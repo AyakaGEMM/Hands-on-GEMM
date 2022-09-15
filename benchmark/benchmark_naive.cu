@@ -14,7 +14,7 @@
 #define BSIZE(type) (sizeof(type) * K * N)
 #define CSIZE(type) (sizeof(type) * M * N)
 
-extern void sgemm(int, int, int, float *, float *, float *, bool beta = false);
+extern void sgemm(int, int, int, float *, float *, float *, float, float);
 
 int main(int argc, char **argv)
 {
@@ -77,14 +77,12 @@ int main(int argc, char **argv)
     if (M % BLOCK_SIZE_M != 0)
         dimGrid.y++;
 
-    // warm up here
-    sgemm(M, N, K, d_A, d_B, d_C);
     checkCudaErrors(cudaEventRecord(start));
 
     printf("Grid Dim: (%d %d) Block Dim: (%d %d)\n", dimGrid.x, dimGrid.y, dimBlock.x, dimBlock.y);
     for (int run = 0; run < nIter; run++)
     {
-        sgemm(M, N, K, d_A, d_B, d_C);
+        sgemm(M, N, K, d_A, d_B, d_C, alpha, beta);
     }
     checkCudaErrors(cudaEventRecord(stop));
     checkCudaErrors(cudaEventSynchronize(stop));
@@ -108,8 +106,8 @@ int main(int argc, char **argv)
     {
         checkCuBlasErrors(
             cublasSgemm(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                        M, N, K, &alpha,
-                        d_A, K, d_B, N, &beta, d_C, N));
+                        N, M, K, &alpha,
+                        d_B, N, d_A, K, &beta, d_C, N));
     }
     checkCudaErrors(cudaEventRecord(stop));
     checkCudaErrors(cudaEventSynchronize(stop));

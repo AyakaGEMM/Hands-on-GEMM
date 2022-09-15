@@ -129,12 +129,9 @@ void FillMatrix(float *A, float num, int M, int N)
 void genFixedMatrix(float *A, int M, int N)
 {
     float val = 0;
-    for (int i = 0; i < M; i++)
+    for (int i = 0; i < M * N; i++)
     {
-        for (int j = 0; j < N; j++)
-        {
-            A[i * N + j] = val++;
-        }
+        A[i] = val++;
     }
 }
 
@@ -160,12 +157,9 @@ void genSparseMatrix(float *A, int M, int N, int sparsity)
 
 void copyMatrix(float *des, float *src, int M, int N)
 {
-    for (int i = 0; i < M; i++)
+    for (int i = 0; i < M * N; i++)
     {
-        for (int j = 0; j < N; j++)
-        {
-            des[i * N + j] = src[i * N + j];
-        }
+        des[i] = src[i];
     }
 }
 
@@ -176,7 +170,7 @@ void showMatrix(float *A, int M, int N, const char *msg)
     {
         for (int j = 0; j < N; j++)
         {
-            printf("%f ", A[i * M + j]);
+            printf("%f ", A[i * N + j]);
         }
         printf("\n");
     }

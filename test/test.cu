@@ -13,7 +13,7 @@
 #define BSIZE(type) (sizeof(type) * K * N)
 #define CSIZE(type) (sizeof(type) * M * N)
 
-extern void sgemm(int, int, int, float *, float *, float *, bool beta = false);
+extern void sgemm(int, int, int, float *, float *, float *, float, float);
 
 int main(int argc, char **argv)
 {
@@ -28,10 +28,10 @@ int main(int argc, char **argv)
 
     std::cout << M << " " << N << " " << K << std::endl;
 
-    float *h_A = (float *)malloc(ASIZE(float));
-    float *h_B = (float *)malloc(BSIZE(float));
-    float *h_C = (float *)malloc(CSIZE(float));
-    float *h_C1 = (float *)malloc(CSIZE(float));
+    float *h_A = new float[M * K];
+    float *h_B = new float[N * K];
+    float *h_C = new float[M * N];
+    float *h_C1 = new float[M * N];
 
     float *d_A;
     float *d_B;
@@ -54,20 +54,28 @@ int main(int argc, char **argv)
     const int THREAD_SIZE_X = 4;
     const bool ENABLE_DOUBLE_BUFFER = false;
 
-    float alpha = 1;
-    float beta = 0;
+    float alpha = 2;
+    float beta = 2;
 
     // 生成A的数据
-    genFixedMatrix(h_A, M, K);
-    genFixedMatrix(h_B, K, N);
-    genFixedMatrix(h_C, M, N);
+    genRandomMatrix(h_A, M, K);
+    genRandomMatrix(h_B, K, N);
+    genRandomMatrix(h_C, M, N);
     copyMatrix(h_C1, h_C, M, N);
 
     checkCudaErrors(cudaMemcpy(d_A, h_A, ASIZE(float), cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpy(d_B, h_B, BSIZE(float), cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpy(d_C, h_C, CSIZE(float), cudaMemcpyHostToDevice)); // Free Memory
 
-    printf("ok\n");
+    for (int i = 0; i < M; i++)
+        for (int j = 0; j < N; j++)
+        {
+            h_C[i * N + j] = beta * h_C[i * N + j];
+            for (int k = 0; k < K; k++)
+                h_C[i * N + j] += alpha * h_A[i * K + k] * h_B[k * N + j];
+        }
+    showMatrix(h_C, M, N, "Matrix Ref");
+    copyMatrix(h_C, h_C1, M, N);
 
     cudaEvent_t start, stop;
     checkCudaErrors(cudaEventCreate(&start));
@@ -75,22 +83,21 @@ int main(int argc, char **argv)
     float msecTotal = 0;
     int nIter = 100;
 
-    sgemm(M, N, K, d_A, d_B, d_C);
+    sgemm(M, N, K, d_A, d_B, d_C, alpha, beta);
 
     checkCudaErrors(cudaMemcpy(h_C, d_C, CSIZE(float), cudaMemcpyDeviceToHost));
 
     cublasHandle_t blas_handle;
     checkCuBlasErrors(cublasCreate(&blas_handle));
     checkCudaErrors(cudaMemcpy(d_C, h_C1, CSIZE(float), cudaMemcpyHostToDevice));
+
     checkCuBlasErrors(
         cublasSgemm(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                    M, N, K, &alpha,
-                    d_A, M, d_B, K, &beta, d_C, M));
+                    N, M, K, &alpha,
+                    d_B, N, d_A, K, &beta, d_C, N));
 
     checkCudaErrors(cudaMemcpy(h_C1, d_C, CSIZE(float), cudaMemcpyDeviceToHost));
 
-    showMatrix(h_A, M, K, "Matrix A");
-    showMatrix(h_B, K, N, "Matrix B");
     showMatrix(h_C, M, N, "Matrix C1");
     showMatrix(h_C1, M, N, "Matrix C2");
 
@@ -98,22 +105,12 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaFree(d_B));
     checkCudaErrors(cudaFree(d_C));
 
-    for (int i = 0; i < M; i++)
-        for (int j = 0; j < N; j++)
-        {
-            h_C[i * K + j] = 0;
-            for (int k = 0; k < K; k++)
-                h_C[i * K + j] += h_A[i * K + k] * h_B[k * N + j];
-        }
-
-    showMatrix(h_C, M, N, "Matrix Ref");
-
-    free(h_A);
+    delete[] h_A;
     printf("Ok A\n");
-    free(h_B);
+    delete[] h_B;
     printf("Ok B\n");
-    free(h_C);
+    delete[] h_C;
     printf("Ok C\n");
-    free(h_C1);
+    delete[] h_C1;
     printf("Ok C1\n");
 }

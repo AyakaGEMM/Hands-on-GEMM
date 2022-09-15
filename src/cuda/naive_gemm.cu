@@ -6,24 +6,24 @@
 #include <iostream>
 
 __global__ void matrixMul(const float *A, const float *B, float *C,
-                          int M, int N, int K)
+                          int M, int N, int K, float alpha, float beta)
 {
-    int tx = threadIdx.x;
-    int ty = threadIdx.y;
+    int tx = blockIdx.x * blockDim.x + threadIdx.x;
+    int ty = blockIdx.y * blockDim.y + threadIdx.y;
     if (tx < M && ty < N)
     {
-        float c = 0;
+        float c = beta * C[tx * N + ty];
         for (int i = 0; i < K; ++i)
         {
-            c += A[tx * K + i] * B[i * N + ty];
+            c += alpha * A[tx * K + i] * B[i * N + ty];
         }
         C[tx * N + ty] = c;
     }
 }
 
-void sgemm(int M, int N, int K, float *a, float *b, float *c, bool beta = false)
+void sgemm(int M, int N, int K, float *a, float *b, float *c, float alpha = 1, float beta = 0)
 {
-    int numBlocks = 1;
-    dim3 threadsPerBlock(M, N);
-    matrixMul<<<numBlocks, threadsPerBlock>>>(a, b, c, M, N, K);
+    dim3 threadsPerBlock(16, 16);
+    dim3 numBlocks((M + threadsPerBlock.x - 1) / threadsPerBlock.x, (N + threadsPerBlock.y - 1) / threadsPerBlock.y);
+    matrixMul<<<numBlocks, threadsPerBlock>>>(a, b, c, M, N, K, alpha, beta);
 }
