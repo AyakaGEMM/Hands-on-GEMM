@@ -17,11 +17,11 @@ extern void sgemm(int, int, int, float *, float *, float *, float, float);
 
 int main(int argc, char **argv)
 {
-    if (argc != 4)
-    {
-        printf("usage: ./main [M] [K] [N]\n");
-        exit(0);
-    }
+    // if (argc != 4)
+    //{
+    //     printf("usage: ./main [M] [K] [N]\n");
+    //     exit(0);
+    // }
     size_t M = atoi(argv[1]);
     size_t N = atoi(argv[2]);
     size_t K = atoi(argv[3]);
