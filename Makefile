@@ -19,7 +19,7 @@ FLAGS=-gencode=arch=compute_35,code=sm_35 \
     -gencode=arch=compute_75,code=sm_75 \
     -gencode=arch=compute_60,code=compute_60
 OPTI=-O3
-DEBUG=--debug -g
+DEBUG=--debug -g -G -O0
 
 Wno=-Xcudafe "--diag_suppress=declared_but_not_referenced" -Wno-deprecated-gpu-targets
 
