@@ -12,7 +12,7 @@ void __syncthreads(); // workaround __syncthreads warning
 const size_t BLOCK_SIZE = 16; // we assume that every block has equal blockDim.x and blockDim.y
 const size_t BLOCK_M = 64;    // These const values decide how many thing a thread compute and the amount of shared memory to allocate.
 const size_t BLOCK_N = 64;
-const size_t BLOCK_K = 16;
+const size_t BLOCK_K = 16; // don't set 64 here, it will cause bank conflict and lower occupancy.
 const size_t BLOCK_M_COMPUTE = BLOCK_M / BLOCK_SIZE;
 const size_t BLOCK_N_COMPUTE = BLOCK_N / BLOCK_SIZE;
 const size_t BLOCK_K_COMPUTE = BLOCK_K / BLOCK_SIZE;
@@ -27,7 +27,7 @@ const int shared_memory_size = shared_memory_element * sizeof(float); // shared 
 __forceinline__ __device__ float convertColIdx(int idx, const float *begin, int subM, int subN, int N)
 {
     int m = idx / subM, n = idx % subM;
-    return begin[m * N + n];
+    return begin[m + n * N];
 }
 
 __forceinline__ __device__ float convertRowIdx(int idx, const float *begin, int subM, int subN, int N)
@@ -55,7 +55,6 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     __shared__ float subB[BLOCK_SIZE * BLOCK_SIZE * BLOCK_N_COMPUTE * BLOCK_K_COMPUTE];
     for (int i = 0; i < K; i += BLOCK_K)
     {
-        __syncthreads();
         for (int idx = (threadIdx.x * blockDim.x + threadIdx.y) * moveNum; idx < (threadIdx.x * blockDim.x + threadIdx.y) * moveNum + moveNum; idx++)
         {
             if (idx < shared_memory_A)
@@ -90,6 +89,7 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
                 }
             }
         }
+        __syncthreads();
     }
 
     for (int i = 0; i < BLOCK_M_COMPUTE; i++)
