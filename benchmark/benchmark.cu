@@ -32,7 +32,7 @@ int main(int argc, char **argv)
         miss_align = atoi(argv[2]) == 1;
     if (argc > 3)
         ignore_error = atoi(argv[3]) == 1;
-    for (int i = 64; i <= nmax + 63; i += 64)
+    for (int i = 128; i <= nmax + 127; i += 128)
     {
         if (miss_align)
         {
@@ -65,6 +65,8 @@ int main(int argc, char **argv)
         size_t M = i;
         size_t K = i;
         size_t N = i;
+
+        printf("\nSize M: %u, N: %u, K: %u\n", M, N, K);
 
         double msecPerMatrixMul[2] = {0, 0};
         double gigaFlops[2] = {0, 0};
