@@ -6,6 +6,7 @@
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 void __syncthreads(); // workaround __syncthreads warning
+void __syncwarp();
 #endif
 #include <iostream>
 const size_t BLOCK_SIZE = 16; // we assume that every block has equal blockDim.x and blockDim.y
@@ -22,16 +23,16 @@ const int shared_memory_size = shared_memory_element * sizeof(float); // shared 
 #define colM(a, i, j, lda) a[((j) * (lda)) + (i)]
 #define rowM(a, i, j, lda) a[(j) + (i) * (lda)]
 
-__forceinline__ __device__ float convertColIdx(int idx, const float *begin, int subM, int subN, int N)
+constexpr __forceinline__ __device__ auto convertColIdx(int idx, const float *begin, int subM, int subN, int N)
 {
     int m = idx / subM, n = idx % subM;
-    return begin[m + n * N];
+    return begin + m + n * N;
 }
 
-__forceinline__ __device__ float convertRowIdx(int idx, const float *begin, int subM, int subN, int N)
+constexpr __forceinline__ __device__ auto convertRowIdx(int idx, const float *begin, int subM, int subN, int N)
 {
     int m = idx / subN, n = idx % subN;
-    return begin[m * N + n];
+    return begin + m * N + n;
 }
 
 __global__ void matrixMul(const float *A, const float *B, float *C,
@@ -45,22 +46,36 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 
     float c[BLOCK_M_COMPUTE * BLOCK_N_COMPUTE] = {};
 
-    __shared__ float subA[BLOCK_M * BLOCK_K];
+    __shared__ float subA[(BLOCK_M + 1) * BLOCK_K];
     __shared__ float subB[BLOCK_N * BLOCK_K];
 
     float regB[BLOCK_M_COMPUTE]; // hopefully, these should reside in register.
+    float regCopy[4];
     float regA;
 
     for (int i = 0; i < K; i += BLOCK_K)
     {
-#pragma unroll
-        for (int idx = 0; idx < moveNum; idx++)
+
+#pragma unroll // We have to do the float4 copy here, cause cuda copy 32bytes at a time.
+        for (int idx = 0; idx < moveNum; idx += 4)
         {
-            subA[baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE] = convertColIdx(baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE, A + baseX * K + i, BLOCK_M, BLOCK_K, K);
-            subB[baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE] = convertRowIdx(baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE, B + baseY + i * N, BLOCK_K, BLOCK_N, N);
+            //*(reinterpret_cast<float4 *>(regCopy)) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4 + 0 * idx * BLOCK_SIZE * BLOCK_SIZE * 4, A + baseX * K + i, BLOCK_M, BLOCK_K, K)));
+            *(reinterpret_cast<float4 *>(regCopy)) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4, A + baseX * K + i, BLOCK_M, BLOCK_K, K)));
+            const auto m = (baseIdx * 4) / BLOCK_K, n = (baseIdx * 4) % BLOCK_K;
+            subA[m + n * (BLOCK_M + 1)] = regCopy[0];
+            subA[m + (n + 1) * (BLOCK_M + 1)] = regCopy[1];
+            subA[m + (n + 2) * (BLOCK_M + 1)] = regCopy[2];
+            subA[m + (n + 3) * (BLOCK_M + 1)] = regCopy[3];
         }
+#pragma unroll
+        for (int idx = 0; idx < moveNum; idx += 4)
+        {
+            //*reinterpret_cast<float4 *>(&subB[baseIdx * 4 + idx * BLOCK_SIZE * BLOCK_SIZE * 4]) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4 + 0 * idx * BLOCK_SIZE * BLOCK_SIZE * 4, B + baseY + i * N, BLOCK_K, BLOCK_N, N)));
+            *reinterpret_cast<float4 *>(&subB[baseIdx * 4 + idx * BLOCK_SIZE * BLOCK_SIZE * 4]) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4, B + baseY + i * N, BLOCK_K, BLOCK_N, N)));
+        }
+
         __syncthreads();
-#pragma unroll(4)
+#pragma unroll
         for (int ii = 0; ii < BLOCK_K; ii++)
         {
 #pragma unroll
@@ -71,7 +86,7 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 #pragma unroll
             for (int cpi = 0; cpi < BLOCK_M_COMPUTE; cpi++)
             {
-                regA = subA[(threadIdx.x * BLOCK_M_COMPUTE + cpi) + ii * BLOCK_M];
+                regA = subA[(threadIdx.x * BLOCK_M_COMPUTE + cpi) + ii * (BLOCK_M + 1)];
 #pragma unroll
                 for (int cpj = 0; cpj < BLOCK_N_COMPUTE; cpj++)
                 {

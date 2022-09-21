@@ -26,13 +26,13 @@ const int shared_memory_size = shared_memory_element * sizeof(float); // shared 
 #define colM(a, i, j, lda) a[((j) * (lda)) + (i)]
 #define rowM(a, i, j, lda) a[(j) + (i) * (lda)]
 
-__forceinline__ __device__ auto convertColIdx(int idx, const float *begin, int subM, int subN, int N)
+constexpr __forceinline__ __device__ auto convertColIdx(int idx, const float *begin, int subM, int subN, int N)
 {
     int m = idx / subM, n = idx % subM;
     return begin + m + n * N;
 }
 
-__forceinline__ __device__ auto convertRowIdx(int idx, const float *begin, int subM, int subN, int N)
+constexpr __forceinline__ __device__ auto convertRowIdx(int idx, const float *begin, int subM, int subN, int N)
 {
     int m = idx / subN, n = idx % subN;
     return begin + m * N + n;
@@ -44,8 +44,8 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     const int baseX = blockIdx.x * blockDim.x * BLOCK_M_COMPUTE;
     const int baseY = blockIdx.y * blockDim.y * BLOCK_N_COMPUTE;
 
-    const int moveNum = shared_memory_element / (BLOCK_SIZE * BLOCK_SIZE);
-    const size_t baseIdx = (threadIdx.x * blockDim.x + threadIdx.y) * moveNum;
+    const int moveNum = shared_memory_element / (BLOCK_SIZE * BLOCK_SIZE) / 2;
+    const size_t baseIdx = threadIdx.x * blockDim.x + threadIdx.y;
 
     float c[BLOCK_M_COMPUTE * BLOCK_N_COMPUTE] = {};
 
@@ -54,23 +54,21 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     __shared__ float subA[stage_count][BLOCK_M * BLOCK_K];
     __shared__ float subB[stage_count][BLOCK_N * BLOCK_K];
 
-    float regB[stage_count][BLOCK_M_COMPUTE]; // hopefully, these should reside in register.
+    float regB[stage_count][BLOCK_N_COMPUTE]; // hopefully, these should reside in register.
     float regA[stage_count];
 
 #pragma unroll
     for (int idx = 0; idx < moveNum; idx++)
     {
-        if (idx + baseIdx < shared_memory_A)
-        {
-            // cuda::memcpy_async(block, subA[0] + idx + baseIdx, convertColIdx(idx + baseIdx, A + baseX * K, BLOCK_M, BLOCK_K, K), sizeof(float), pipeline);
-            subA[0][idx + baseIdx] = *convertColIdx(idx + baseIdx, A + baseX * K, BLOCK_M, BLOCK_K, K);
-        }
-        else
-        {
-            // cuda::memcpy_async(block, subB[0] + idx + baseIdx - shared_memory_A, convertRowIdx(idx + baseIdx - shared_memory_A, B + baseY, BLOCK_K, BLOCK_N, N), sizeof(float), pipeline);
-            subB[0][idx + baseIdx - shared_memory_A] = *convertRowIdx(idx + baseIdx - shared_memory_A, B + baseY, BLOCK_K, BLOCK_N, N);
-        }
+        subA[0][baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE] = *convertColIdx(baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE, A + baseX * K, BLOCK_M, BLOCK_K, K);
     }
+#pragma unroll
+    for (int idx = 0; idx < moveNum; idx += 4)
+    {
+        *reinterpret_cast<float4 *>(&subB[0][baseIdx * 4]) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4 + idx * BLOCK_SIZE * BLOCK_SIZE * 4, B + baseY, BLOCK_K, BLOCK_N, N)));
+    }
+
+    __syncthreads();
 
     for (int i = BLOCK_K; i < K; i += BLOCK_K)
     {
@@ -80,19 +78,15 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 #pragma unroll
         for (int idx = 0; idx < moveNum; idx++)
         {
-            if ((idx + baseIdx) < shared_memory_A)
-            {
-                subA[copy_stage_idx][idx + baseIdx] = *convertColIdx(idx + baseIdx, A + baseX * K + i, BLOCK_M, BLOCK_K, K);
-            }
-            else
-            {
-
-                subB[copy_stage_idx][idx + baseIdx - shared_memory_A] = *convertRowIdx(idx + baseIdx - shared_memory_A, B + baseY + i * N, BLOCK_K, BLOCK_N, N);
-            }
+            subA[copy_stage_idx][baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE] = *convertColIdx(baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE, A + baseX * K + i, BLOCK_M, BLOCK_K, K);
         }
-        __syncthreads();
+#pragma unroll
+        for (int idx = 0; idx < moveNum; idx += 4)
+        {
+            *reinterpret_cast<float4 *>(&subB[copy_stage_idx][baseIdx * 4]) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4, B + baseY + i * N, BLOCK_K, BLOCK_N, N)));
+        }
 
-#pragma unroll(4)
+#pragma unroll
         for (int ii = 0; ii < BLOCK_K; ii++)
         {
 #pragma unroll
@@ -114,7 +108,7 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
         __syncthreads();
     }
 
-#pragma unroll(4)
+#pragma unroll
     for (int ii = 0; ii < BLOCK_K; ii++)
     {
 #pragma unroll

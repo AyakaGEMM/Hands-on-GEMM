@@ -7,7 +7,8 @@
 #define __CUDACC__
 #define __HAHA__
 #endif
-#include <cooperative_groups.h>
+
+#include <cooperative_groups/memcpy_async.h>
 
 #ifdef __HAHA__
 #undef __CUDACC__
