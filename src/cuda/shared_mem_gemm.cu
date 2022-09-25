@@ -9,17 +9,17 @@ void __syncthreads(); // workaround __syncthreads warning
 void __syncwarp();
 #endif
 #include <iostream>
-const size_t BLOCK_SIZE = 16; // we assume that every block has equal blockDim.x and blockDim.y
-const size_t BLOCK_M = 128;   // These const values decide how many thing a thread compute and the amount of shared memory to allocate.
-const size_t BLOCK_N = 128;
-const size_t BLOCK_K = 8; // don't set 64 here, it will cause bank conflict and lower occupancy.
-const size_t BLOCK_M_COMPUTE = BLOCK_M / BLOCK_SIZE;
-const size_t BLOCK_N_COMPUTE = BLOCK_N / BLOCK_SIZE;
+constexpr size_t BLOCK_SIZE = 16; // we assume that every block has equal blockDim.x and blockDim.y
+constexpr size_t BLOCK_M = 128;   // These const values decide how many thing a thread compute and the amount of shared memory to allocate.
+constexpr size_t BLOCK_N = 128;
+constexpr size_t BLOCK_K = 8; // don't set 64 here, it will cause bank conflict and lower occupancy.
+constexpr size_t BLOCK_M_COMPUTE = BLOCK_M / BLOCK_SIZE;
+constexpr size_t BLOCK_N_COMPUTE = BLOCK_N / BLOCK_SIZE;
 
-const int shared_memory_A = BLOCK_M * BLOCK_K;
-const int shared_memory_B = BLOCK_N * BLOCK_K;
-const int shared_memory_element = shared_memory_A + shared_memory_B;
-const int shared_memory_size = shared_memory_element * sizeof(float); // shared memory to use.
+constexpr int shared_memory_A = BLOCK_M * BLOCK_K;
+constexpr int shared_memory_B = BLOCK_N * BLOCK_K;
+constexpr int shared_memory_element = shared_memory_A + shared_memory_B;
+constexpr int shared_memory_size = shared_memory_element * sizeof(float); // shared memory to use.
 #define colM(a, i, j, lda) a[((j) * (lda)) + (i)]
 #define rowM(a, i, j, lda) a[(j) + (i) * (lda)]
 
@@ -44,53 +44,68 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     const int moveNum = shared_memory_element / (BLOCK_SIZE * BLOCK_SIZE) / 2;
     const size_t baseIdx = threadIdx.x * blockDim.x + threadIdx.y;
 
-    float c[BLOCK_M_COMPUTE * BLOCK_N_COMPUTE] = {};
+    constexpr size_t threadsNum = BLOCK_SIZE * BLOCK_SIZE;
 
-    __shared__ float subA[(BLOCK_M + 1) * BLOCK_K];
+    float c[BLOCK_M_COMPUTE * BLOCK_N_COMPUTE] = {};
+    float resC[BLOCK_M_COMPUTE * BLOCK_N_COMPUTE] = {};
+
+    __shared__ float subA[BLOCK_M * BLOCK_K];
     __shared__ float subB[BLOCK_N * BLOCK_K];
 
-    float regB[BLOCK_M_COMPUTE]; // hopefully, these should reside in register.
-    float regCopy[4];
-    float regA;
+    float4 regB[BLOCK_M_COMPUTE / 4]; // hopefully, these should reside in register.
+    float4 regA[BLOCK_M_COMPUTE / 4];
+
+    const float *baseA = A + baseX * K;
+    const float *baseB = B + baseY;
+    float *baseC = C + (baseX + threadIdx.x * BLOCK_M_COMPUTE) * N + baseY + threadIdx.y * BLOCK_N_COMPUTE;
+
+    int colA = baseIdx % BLOCK_M, colB = baseIdx / (BLOCK_N / 4), rowA = baseIdx / 128 * 4, rowB = (baseIdx * 4) % BLOCK_N;
 
     for (int i = 0; i < K; i += BLOCK_K)
     {
-
-#pragma unroll // We have to do the float4 copy here, cause cuda copy 32bytes at a time.
-        for (int idx = 0; idx < moveNum; idx += 4)
-        {
-            //*(reinterpret_cast<float4 *>(regCopy)) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4 + 0 * idx * BLOCK_SIZE * BLOCK_SIZE * 4, A + baseX * K + i, BLOCK_M, BLOCK_K, K)));
-            *(reinterpret_cast<float4 *>(regCopy)) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4, A + baseX * K + i, BLOCK_M, BLOCK_K, K)));
-            const auto m = (baseIdx * 4) / BLOCK_K, n = (baseIdx * 4) % BLOCK_K;
-            subA[m + n * (BLOCK_M + 1)] = regCopy[0];
-            subA[m + (n + 1) * (BLOCK_M + 1)] = regCopy[1];
-            subA[m + (n + 2) * (BLOCK_M + 1)] = regCopy[2];
-            subA[m + (n + 3) * (BLOCK_M + 1)] = regCopy[3];
-        }
-#pragma unroll
-        for (int idx = 0; idx < moveNum; idx += 4)
-        {
-            //*reinterpret_cast<float4 *>(&subB[baseIdx * 4 + idx * BLOCK_SIZE * BLOCK_SIZE * 4]) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4 + 0 * idx * BLOCK_SIZE * BLOCK_SIZE * 4, B + baseY + i * N, BLOCK_K, BLOCK_N, N)));
-            *reinterpret_cast<float4 *>(&subB[baseIdx * 4 + idx * BLOCK_SIZE * BLOCK_SIZE * 4]) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4, B + baseY + i * N, BLOCK_K, BLOCK_N, N)));
-        }
+        regB[0] = *reinterpret_cast<const float4 *>(baseB + i * N + colB * N + rowB);
+        regA[0] = *reinterpret_cast<const float4 *>(baseA + i + colA * K + rowA);
+        *reinterpret_cast<float4 *>(&subB[baseIdx * 4]) = regB[0];
+        subA[colA + rowA * BLOCK_M] = regA[0].x;
+        subA[colA + (rowA + 1) * BLOCK_M] = regA[0].y;
+        subA[colA + (rowA + 2) * BLOCK_M] = regA[0].z;
+        subA[colA + (rowA + 3) * BLOCK_M] = regA[0].w;
 
         __syncthreads();
 #pragma unroll
         for (int ii = 0; ii < BLOCK_K; ii++)
         {
+            regA[0] = *reinterpret_cast<float4 *>(&subA[(threadIdx.x * BLOCK_M_COMPUTE) + ii * BLOCK_M]);
+            regA[1] = *reinterpret_cast<float4 *>(&subA[(threadIdx.x * BLOCK_M_COMPUTE + 4) + ii * BLOCK_M]);
+
+            regB[0] = *reinterpret_cast<float4 *>(&subB[threadIdx.y * BLOCK_N_COMPUTE + BLOCK_N * ii]);
+            regB[1] = *reinterpret_cast<float4 *>(&subB[threadIdx.y * BLOCK_N_COMPUTE + 4 + BLOCK_N * ii]);
+
 #pragma unroll
-            for (int cpj = 0; cpj < BLOCK_N_COMPUTE; cpj++)
+            for (int cpi = 0; cpi < BLOCK_M_COMPUTE / 4; cpi++)
             {
-                regB[cpj] = subB[threadIdx.y * BLOCK_N_COMPUTE + cpj + BLOCK_N * ii];
-            }
 #pragma unroll
-            for (int cpi = 0; cpi < BLOCK_M_COMPUTE; cpi++)
-            {
-                regA = subA[(threadIdx.x * BLOCK_M_COMPUTE + cpi) + ii * (BLOCK_M + 1)];
-#pragma unroll
-                for (int cpj = 0; cpj < BLOCK_N_COMPUTE; cpj++)
+                for (int cpj = 0; cpj < BLOCK_N_COMPUTE / 4; cpj++)
                 {
-                    c[cpi * BLOCK_M_COMPUTE + cpj] += regA * regB[cpj];
+                    c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4] += regA[cpi].x * regB[cpj].x;
+                    c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[cpi].x * regB[cpj].y;
+                    c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[cpi].x * regB[cpj].z;
+                    c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[cpi].x * regB[cpj].w;
+
+                    c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4] += regA[cpi].y * regB[cpj].x;
+                    c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[cpi].y * regB[cpj].y;
+                    c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[cpi].y * regB[cpj].z;
+                    c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[cpi].y * regB[cpj].w;
+
+                    c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4] += regA[cpi].z * regB[cpj].x;
+                    c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[cpi].z * regB[cpj].y;
+                    c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[cpi].z * regB[cpj].z;
+                    c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[cpi].z * regB[cpj].w;
+
+                    c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4] += regA[cpi].w * regB[cpj].x;
+                    c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[cpi].w * regB[cpj].y;
+                    c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[cpi].w * regB[cpj].z;
+                    c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[cpi].w * regB[cpj].w;
                 }
             }
         }
@@ -100,8 +115,20 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 #pragma unroll
     for (int i = 0; i < BLOCK_M_COMPUTE; i++)
 #pragma unroll
+        for (int j = 0; j < BLOCK_N_COMPUTE; j += 4)
+            *reinterpret_cast<float4 *>(&resC[i * BLOCK_M_COMPUTE + j]) = *reinterpret_cast<float4 *>(&baseC[i * N + j]);
+
+#pragma unroll
+    for (int i = 0; i < BLOCK_M_COMPUTE; i++)
+#pragma unroll
         for (int j = 0; j < BLOCK_N_COMPUTE; j++)
-            C[(baseX + threadIdx.x * BLOCK_M_COMPUTE + i) * N + baseY + threadIdx.y * BLOCK_N_COMPUTE + j] = beta * C[(baseX + threadIdx.x * BLOCK_M_COMPUTE + i) * N + baseY + threadIdx.y * BLOCK_N_COMPUTE + j] + alpha * c[i * BLOCK_M_COMPUTE + j];
+            resC[i * BLOCK_M_COMPUTE + j] = resC[i * BLOCK_M_COMPUTE + j] * beta + alpha * c[i * BLOCK_M_COMPUTE + j];
+
+#pragma unroll
+    for (int i = 0; i < BLOCK_M_COMPUTE; i++)
+#pragma unroll
+        for (int j = 0; j < BLOCK_N_COMPUTE; j += 4)
+            *reinterpret_cast<float4 *>(&baseC[i * N + j]) = *reinterpret_cast<float4 *>(&resC[i * BLOCK_M_COMPUTE + j]);
 }
 
 void sgemm(int M, int N, int K, float *a, float *b, float *c, float alpha = 1, float beta = 0)

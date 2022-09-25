@@ -54,8 +54,12 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     __shared__ float subA[stage_count][BLOCK_M * BLOCK_K];
     __shared__ float subB[stage_count][BLOCK_N * BLOCK_K];
 
-    float regB[stage_count][BLOCK_N_COMPUTE]; // hopefully, these should reside in register.
-    float regA[stage_count];
+    float4 regB[stage_count][BLOCK_N_COMPUTE / 4]; // hopefully, these should reside in register.
+    float4 regA[stage_count];
+    float4 regCopy[stage_count];
+
+    size_t copy_stage_idx = 0;
+    size_t compute_stage_idx = 0;
 
 #pragma unroll
     for (int idx = 0; idx < moveNum; idx++)
@@ -68,17 +72,21 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
         *reinterpret_cast<float4 *>(&subB[0][baseIdx * 4]) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4 + idx * BLOCK_SIZE * BLOCK_SIZE * 4, B + baseY, BLOCK_K, BLOCK_N, N)));
     }
 
+    copy_stage_idx ^= 1;
+
     __syncthreads();
 
     for (int i = BLOCK_K; i < K; i += BLOCK_K)
     {
-        size_t copy_stage_idx = (i / BLOCK_K) % 2;
-        size_t compute_stage_idx = (i / BLOCK_K - 1) % 2;
-
 #pragma unroll
         for (int idx = 0; idx < moveNum; idx++)
         {
-            subA[copy_stage_idx][baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE] = *convertColIdx(baseIdx + idx * BLOCK_SIZE * BLOCK_SIZE, A + baseX * K + i, BLOCK_M, BLOCK_K, K);
+            regCopy[copy_stage_idx] = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4, A + baseX * K + i, BLOCK_M, BLOCK_K, K)));
+            const auto m = (baseIdx * 4) / BLOCK_K, n = (baseIdx * 4) % BLOCK_K;
+            subA[copy_stage_idx][m + n * BLOCK_M] = regCopy[copy_stage_idx].x;
+            subA[copy_stage_idx][m + (n + 1) * BLOCK_M] = regCopy[copy_stage_idx].y;
+            subA[copy_stage_idx][m + (n + 2) * BLOCK_M] = regCopy[copy_stage_idx].z;
+            subA[copy_stage_idx][m + (n + 3) * BLOCK_M] = regCopy[copy_stage_idx].w;
         }
 #pragma unroll
         for (int idx = 0; idx < moveNum; idx += 4)
@@ -86,25 +94,46 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
             *reinterpret_cast<float4 *>(&subB[copy_stage_idx][baseIdx * 4]) = *(reinterpret_cast<const float4 *>(convertRowIdx(baseIdx * 4, B + baseY + i * N, BLOCK_K, BLOCK_N, N)));
         }
 
+        copy_stage_idx ^= 1;
+
 #pragma unroll
         for (int ii = 0; ii < BLOCK_K; ii++)
         {
 #pragma unroll
-            for (int cpj = 0; cpj < BLOCK_N_COMPUTE; cpj++)
+            for (int cpj = 0; cpj < BLOCK_N_COMPUTE / 4; cpj++)
             {
-                regB[compute_stage_idx][cpj] = subB[compute_stage_idx][threadIdx.y * BLOCK_N_COMPUTE + cpj + BLOCK_N * ii];
+                regB[compute_stage_idx][cpj] = *reinterpret_cast<float4 *>(&subB[compute_stage_idx][threadIdx.y * BLOCK_N_COMPUTE + cpj * 4 + BLOCK_N * ii]);
             }
 #pragma unroll
-            for (int cpi = 0; cpi < BLOCK_M_COMPUTE; cpi++)
+            for (int cpi = 0; cpi < BLOCK_M_COMPUTE / 4; cpi++)
             {
-                regA[compute_stage_idx] = subA[compute_stage_idx][(threadIdx.x * BLOCK_M_COMPUTE + cpi) + ii * BLOCK_M];
+                regA[compute_stage_idx] = *reinterpret_cast<float4 *>(&subA[compute_stage_idx][(threadIdx.x * BLOCK_M_COMPUTE + cpi * 4) + ii * BLOCK_M]);
 #pragma unroll
-                for (int cpj = 0; cpj < BLOCK_N_COMPUTE; cpj++)
+                for (int cpj = 0; cpj < BLOCK_N_COMPUTE / 4; cpj++)
                 {
-                    c[cpi * BLOCK_M_COMPUTE + cpj] += regA[compute_stage_idx] * regB[compute_stage_idx][cpj];
+                    c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4] += regA[compute_stage_idx].x * regB[compute_stage_idx][cpj].x;
+                    c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[compute_stage_idx].x * regB[compute_stage_idx][cpj].y;
+                    c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[compute_stage_idx].x * regB[compute_stage_idx][cpj].z;
+                    c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[compute_stage_idx].x * regB[compute_stage_idx][cpj].w;
+
+                    c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4] += regA[compute_stage_idx].y * regB[compute_stage_idx][cpj].x;
+                    c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[compute_stage_idx].y * regB[compute_stage_idx][cpj].y;
+                    c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[compute_stage_idx].y * regB[compute_stage_idx][cpj].z;
+                    c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[compute_stage_idx].y * regB[compute_stage_idx][cpj].w;
+
+                    c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4] += regA[compute_stage_idx].z * regB[compute_stage_idx][cpj].x;
+                    c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[compute_stage_idx].z * regB[compute_stage_idx][cpj].y;
+                    c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[compute_stage_idx].z * regB[compute_stage_idx][cpj].z;
+                    c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[compute_stage_idx].z * regB[compute_stage_idx][cpj].w;
+
+                    c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4] += regA[compute_stage_idx].w * regB[compute_stage_idx][cpj].x;
+                    c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[compute_stage_idx].w * regB[compute_stage_idx][cpj].y;
+                    c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[compute_stage_idx].w * regB[compute_stage_idx][cpj].z;
+                    c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[compute_stage_idx].w * regB[compute_stage_idx][cpj].w;
                 }
             }
         }
+        compute_stage_idx ^= 1;
         __syncthreads();
     }
 
@@ -112,18 +141,36 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     for (int ii = 0; ii < BLOCK_K; ii++)
     {
 #pragma unroll
-        for (int cpj = 0; cpj < BLOCK_N_COMPUTE; cpj++)
+        for (int cpj = 0; cpj < BLOCK_N_COMPUTE / 4; cpj++)
         {
-            regB[(K / BLOCK_K - 1) % 2][cpj] = subB[(K / BLOCK_K - 1) % 2][threadIdx.y * BLOCK_N_COMPUTE + cpj + BLOCK_N * ii];
+            regB[compute_stage_idx][cpj] = *reinterpret_cast<float4 *>(&subB[compute_stage_idx][threadIdx.y * BLOCK_N_COMPUTE + cpj * 4 + BLOCK_N * ii]);
         }
 #pragma unroll
-        for (int cpi = 0; cpi < BLOCK_M_COMPUTE; cpi++)
+        for (int cpi = 0; cpi < BLOCK_M_COMPUTE / 4; cpi++)
         {
-            regA[(K / BLOCK_K - 1) % 2] = subA[(K / BLOCK_K - 1) % 2][(threadIdx.x * BLOCK_M_COMPUTE + cpi) + ii * BLOCK_M];
+            regA[compute_stage_idx] = *reinterpret_cast<float4 *>(&subA[compute_stage_idx][(threadIdx.x * BLOCK_M_COMPUTE + cpi * 4) + ii * BLOCK_M]);
 #pragma unroll
-            for (int cpj = 0; cpj < BLOCK_N_COMPUTE; cpj++)
+            for (int cpj = 0; cpj < BLOCK_N_COMPUTE / 4; cpj++)
             {
-                c[cpi * BLOCK_M_COMPUTE + cpj] += regA[(K / BLOCK_K - 1) % 2] * regB[(K / BLOCK_K - 1) % 2][cpj];
+                c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4] += regA[compute_stage_idx].x * regB[compute_stage_idx][cpj].x;
+                c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[compute_stage_idx].x * regB[compute_stage_idx][cpj].y;
+                c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[compute_stage_idx].x * regB[compute_stage_idx][cpj].z;
+                c[cpi * 4 * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[compute_stage_idx].x * regB[compute_stage_idx][cpj].w;
+
+                c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4] += regA[compute_stage_idx].y * regB[compute_stage_idx][cpj].x;
+                c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[compute_stage_idx].y * regB[compute_stage_idx][cpj].y;
+                c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[compute_stage_idx].y * regB[compute_stage_idx][cpj].z;
+                c[(cpi * 4 + 1) * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[compute_stage_idx].y * regB[compute_stage_idx][cpj].w;
+
+                c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4] += regA[compute_stage_idx].z * regB[compute_stage_idx][cpj].x;
+                c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[compute_stage_idx].z * regB[compute_stage_idx][cpj].y;
+                c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[compute_stage_idx].z * regB[compute_stage_idx][cpj].z;
+                c[(cpi * 4 + 2) * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[compute_stage_idx].z * regB[compute_stage_idx][cpj].w;
+
+                c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4] += regA[compute_stage_idx].w * regB[compute_stage_idx][cpj].x;
+                c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4 + 1] += regA[compute_stage_idx].w * regB[compute_stage_idx][cpj].y;
+                c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4 + 2] += regA[compute_stage_idx].w * regB[compute_stage_idx][cpj].z;
+                c[(cpi * 4 + 3) * BLOCK_M_COMPUTE + cpj * 4 + 3] += regA[compute_stage_idx].w * regB[compute_stage_idx][cpj].w;
             }
         }
     }
