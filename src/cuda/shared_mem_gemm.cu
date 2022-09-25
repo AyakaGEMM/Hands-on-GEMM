@@ -59,7 +59,7 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     const float *baseB = B + baseY;
     float *baseC = C + (baseX + threadIdx.x * BLOCK_M_COMPUTE) * N + baseY + threadIdx.y * BLOCK_N_COMPUTE;
 
-    int colA = baseIdx % BLOCK_M, colB = baseIdx / (BLOCK_N / 4), rowA = baseIdx / 128 * 4, rowB = (baseIdx * 4) % BLOCK_N;
+    int colA = baseIdx / 2, colB = baseIdx / (BLOCK_N / 4), rowA = (baseIdx & 1) * 4, rowB = (baseIdx * 4) % BLOCK_N;
 
     for (int i = 0; i < K; i += BLOCK_K)
     {
