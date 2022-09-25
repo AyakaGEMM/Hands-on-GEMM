@@ -45,7 +45,7 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     const int baseY = blockIdx.y * blockDim.y * BLOCK_N_COMPUTE;
 
     const int moveNum = shared_memory_element / (BLOCK_SIZE * BLOCK_SIZE) / 2;
-    const size_t baseIdx = threadIdx.x * blockDim.x + threadIdx.y;
+    const size_t baseIdx = threadIdx.y * blockDim.y + threadIdx.x;
 
     float c[BLOCK_M_COMPUTE * BLOCK_N_COMPUTE] = {};
 
