@@ -74,7 +74,7 @@ int main(int argc, char **argv)
             for (int k = 0; k < K; k++)
                 h_C[i * N + j] += alpha * h_A[i * K + k] * h_B[k * N + j];
         }
-    showMatrix(h_C, M, N, "Matrix Ref");
+    // showMatrix(h_C, M, N, "Matrix Ref");
     copyMatrix(h_C, h_C1, M, N);
 
     cudaEvent_t start, stop;
@@ -98,8 +98,8 @@ int main(int argc, char **argv)
 
     checkCudaErrors(cudaMemcpy(h_C1, d_C, CSIZE(float), cudaMemcpyDeviceToHost));
 
-    showMatrix(h_C, M, N, "Matrix C1");
-    showMatrix(h_C1, M, N, "Matrix C2");
+    // showMatrix(h_C, M, N, "Matrix C1");
+    // showMatrix(h_C1, M, N, "Matrix C2");
 
     checkCudaErrors(cudaFree(d_A));
     checkCudaErrors(cudaFree(d_B));
