@@ -58,9 +58,9 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     const float *baseA = A + baseX * K;
     const float *baseB = B + baseY;
 
-    int colA = baseIdx / 2, colB = baseIdx / (BLOCK_N / 4), rowA = (baseIdx & 1) * 4, rowB = (baseIdx * 4) % BLOCK_N;
-    int warpId = baseIdx / 32, warpBaseId = baseIdx % 32;
-    int colC = (warpId / 2 * 4 + warpBaseId % 4) * BLOCK_M_COMPUTE, rowC = ((warpId % 2) * 8 + warpBaseId / 4) * BLOCK_N_COMPUTE;
+    int colA = baseIdx >> 1, colB = baseIdx >> 5, rowA = (baseIdx & 1) << 2, rowB = (baseIdx << 2) & 127;
+    int warpId = baseIdx >> 5, warpBaseId = baseIdx & 31;
+    int colC = ((warpId >> 1 << 2) + (warpBaseId & 3)) << 3, rowC = (((warpId & 1) << 3) + (warpBaseId >> 2)) << 3;
     float *baseC = C + (baseX + colC) * N + baseY + rowC;
 
     for (int i = 0; i < K; i += BLOCK_K)
