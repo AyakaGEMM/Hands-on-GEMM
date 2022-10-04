@@ -13,9 +13,9 @@ STD=c++17
 FLAGS=-gencode=arch=compute_70,code=sm_70 \
     -gencode=arch=compute_75,code=sm_75 \
     -gencode=arch=compute_80,code=sm_80
-OPTI=-O3
+OPTI=-O3  
 DEBUG=--debug -g -G -O0
-PTXAS_FLAGS=--ptxas-options=-v
+PTXAS_FLAGS=--ptxas-options=-v --expt-relaxed-constexpr
 
 Wno=-Xcudafe "--diag_suppress=declared_but_not_referenced" -Wno-deprecated-gpu-targets
 
@@ -60,10 +60,21 @@ benchmark_%: $(BUILD)/benchmark.o $(BUILD)/%_gemm.o
 	$(CU) $^ -std=$(STD) $(OPTI) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
 	# sh ${SCRIPT_SOURCE}/$@.sh
 
+i8benchmark: $(BUILD)/i8-benchmark.o $(BUILD)/i8_gemm.o
+	mkdir -p $(BIN)
+	$(CU) $^ -std=$(STD) $(OPTI) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+	# sh ${SCRIPT_SOURCE}/$@.sh
+
 test_%: $(BUILD)/test.o $(BUILD)/%_gemm.o
 	$(CU) $^ -std=$(STD) -o $(BIN)/$@ -g $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
 
 test_%-d: $(BUILD)/test-d.o $(BUILD)/%_gemm-d.o
+	$(CU) $^ -std=$(STD) -o $(BIN)/$@ -g $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
+i8gemm-test: $(BUILD)/i8gemm-test.o $(BUILD)/i8_gemm.o
+	$(CU) $^ -std=$(STD) -o $(BIN)/$@ -g $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
+i8gemm-test-d: $(BUILD)/i8gemm-test-d.o $(BUILD)/i8_gemm-d.o
 	$(CU) $^ -std=$(STD) -o $(BIN)/$@ -g $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
 
 .PHONY: clean
