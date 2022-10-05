@@ -89,9 +89,9 @@ int main(int argc, char **argv)
     //     printf("usage: ./main [M] [K] [N]\n");
     //     exit(0);
     // }
-    size_t M = 16;
-    size_t N = 16;
-    size_t K = 16;
+    size_t M = 32;
+    size_t N = 32;
+    size_t K = 32;
 
     std::cout << M << " " << N << " " << K << std::endl;
 

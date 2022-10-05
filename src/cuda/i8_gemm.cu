@@ -372,13 +372,12 @@ __global__ void quantWeight(
         for (std::size_t row = 0; row < M; ++row)
         {
             baseOutput[row * N + i] = climp<float, int8_t>(std::nearbyintf(input[col + row * N] * invScale + zeroPoints[col]));
-            sum += baseOutput[row * N];
+            sum += baseOutput[row * N + i];
         }
         sums[col] = sum;
     }
 }
 
-template <const int BLOCK_THREADS, const int workPerThread>
 __global__ void dequantFloatMatrix(
     const int32_t *__restrict__ input,
     const int M,
@@ -389,22 +388,35 @@ __global__ void dequantFloatMatrix(
     const int32_t *sumsA, const int32_t *sumsB,
     float *__restrict__ output)
 {
-    using namespace cub;
+    const int64_t baseIdx = (int)blockIdx.x * blockDim.x;
+    const auto tid = threadIdx.x;
+    const auto tx = tid / 16, ty = tid % 16;
+    const size_t baseX = 16 * blockIdx.x, baseY = 16 * blockIdx.y;
+    const auto warpId = tid / 32;
+    __shared__ int32_t sumA[16], sumB[16], zeroPointB[16];
+    __shared__ float scaleB[16];
 
-    constexpr float kEpsilon = 1e-8f;
-    const int64_t baseIdx = (int)blockIdx.x * blockDim.x + threadIdx.x;
-
-    if (baseIdx * workPerThread < N)
+    if (baseX < M && baseY < N)
     {
-        auto *baseA = input + baseIdx * workPerThread * N;
-        auto baseOutput = output + baseIdx * workPerThread * N;
-
-        for (int i = 0; i < workPerThread; i++)
+        const auto scaleA = *scalesA; // broadcast here
+        const auto zeroPointA = *zeroPointsA;
+        if (warpId == 0) // warp 0 to copy
         {
-            for (int j = 0; j < N; j++)
+            if (tid < 16 && baseX + tid < M)
+                sumA[tid] = sumsA[baseX + tid];
+            else if (tid >= 16 && baseY + tid - 16 < N)
             {
-                baseOutput[i * N + j] = scalesA[0] * scalesB[j] * (baseA[i * N + j] - zeroPointsA[0] * sumsB[j] - zeroPointsB[j] * sumsA[i + baseIdx * workPerThread] + K * zeroPointsA[0] * zeroPointsB[j]);
+                zeroPointB[tid - 16] = zeroPointsB[baseY + tid - 16];
+                scaleB[tid - 16] = scalesB[baseY + tid - 16];
+                sumB[tid - 16] = sumsB[baseY + tid - 16];
             }
+        }
+        __syncthreads();
+        if (baseX + tx < M && baseY + ty < N)
+        {
+            auto baseA = input[(baseX + tx) * N + baseY + ty];
+
+            output[(baseX + tx) * N + baseY + ty] = scaleA * scaleB[ty] * (baseA - zeroPointA * sumB[ty] - zeroPointB[ty] * sumA[tx] + K * zeroPointA * zeroPointB[ty]);
         }
     }
 }
@@ -416,6 +428,7 @@ void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t han
     dim3 threadsPerBlock(threadsPerBlockSize);
     dim3 numInputBlocks((M + threadsPerBlock.x * workPerThread - 1) / threadsPerBlock.x * workPerThread);
     dim3 numWeightBlocks((N + threadsPerBlock.x * workPerThread - 1) / threadsPerBlock.x * workPerThread);
+    dim3 numDequantBlocks((M + 15) / 16, (N + 15) / 16);
     static thread_local quantMatrixHolder quantA(M, K, MIN_MAX), quantB(K, N, PER_COL);
 
     static int32_t *quantC = nullptr;
@@ -449,12 +462,12 @@ void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t han
         prev_size = size;
     }
 
-    cub::DeviceReduce::Max(d_temp_storage, size, a, max, M * K);
+    cub::DeviceReduce::Max(d_temp_storage, size, a, max, M * K); // These two can be fused into one.
     cub::DeviceReduce::Min(d_temp_storage, size, a, min, M * K);
 
 #ifdef __CUDACC__ // workaround for stupid vscode intellisense
-    quantInput<threadsPerBlockSize, workPerThread><<<numInputBlocks, threadsPerBlock>>>(a, M, K, max, min, quantA.dataPtr(), *quantA.scalesPtr(), *quantA.zeroPointsPtr(), quantA.sumsPtr());
-    quantWeight<threadsPerBlockSize, workPerThread><<<numWeightBlocks, threadsPerBlock>>>(b, K, N, quantB.dataPtr(), quantB.scalesPtr(), quantB.zeroPointsPtr(), quantB.sumsPtr());
+    // quantInput<threadsPerBlockSize, workPerThread><<<numInputBlocks, threadsPerBlock>>>(a, M, K, max, min, quantA.dataPtr(), *quantA.scalesPtr(), *quantA.zeroPointsPtr(), quantA.sumsPtr());
+    // quantWeight<threadsPerBlockSize, workPerThread><<<numWeightBlocks, threadsPerBlock>>>(b, K, N, quantB.dataPtr(), quantB.scalesPtr(), quantB.zeroPointsPtr(), quantB.sumsPtr());
 #endif
     int32_t i32alpha = alpha, i32beta = beta;
     cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N,
@@ -467,6 +480,6 @@ void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t han
                  CUBLAS_COMPUTE_32I, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
 
 #ifdef __CUDACC__ // workaround for stupid vscode intellisense
-    dequantFloatMatrix<threadsPerBlockSize, workPerThread><<<numInputBlocks, threadsPerBlock>>>(quantC, M, N, K, quantA.zeroPointsPtr(), quantB.zeroPointsPtr(), quantA.scalesPtr(), quantB.scalesPtr(), quantA.sumsPtr(), quantB.sumsPtr(), c);
+    dequantFloatMatrix<<<numDequantBlocks, threadsPerBlock>>>(quantC, M, N, K, quantA.zeroPointsPtr(), quantB.zeroPointsPtr(), quantA.scalesPtr(), quantB.scalesPtr(), quantA.sumsPtr(), quantB.sumsPtr(), c);
 #endif
 }
