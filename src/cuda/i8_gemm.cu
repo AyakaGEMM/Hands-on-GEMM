@@ -466,8 +466,8 @@ void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t han
     cub::DeviceReduce::Min(d_temp_storage, size, a, min, M * K);
 
 #ifdef __CUDACC__ // workaround for stupid vscode intellisense
-    // quantInput<threadsPerBlockSize, workPerThread><<<numInputBlocks, threadsPerBlock>>>(a, M, K, max, min, quantA.dataPtr(), *quantA.scalesPtr(), *quantA.zeroPointsPtr(), quantA.sumsPtr());
-    // quantWeight<threadsPerBlockSize, workPerThread><<<numWeightBlocks, threadsPerBlock>>>(b, K, N, quantB.dataPtr(), quantB.scalesPtr(), quantB.zeroPointsPtr(), quantB.sumsPtr());
+    quantInput<threadsPerBlockSize, workPerThread><<<numInputBlocks, threadsPerBlock>>>(a, M, K, max, min, quantA.dataPtr(), *quantA.scalesPtr(), *quantA.zeroPointsPtr(), quantA.sumsPtr());
+    quantWeight<threadsPerBlockSize, workPerThread><<<numWeightBlocks, threadsPerBlock>>>(b, K, N, quantB.dataPtr(), quantB.scalesPtr(), quantB.zeroPointsPtr(), quantB.sumsPtr());
 #endif
     int32_t i32alpha = alpha, i32beta = beta;
     cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N,
