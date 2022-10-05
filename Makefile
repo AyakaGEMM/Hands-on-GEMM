@@ -1,4 +1,5 @@
-CU=/opt/cuda/bin/nvcc
+CUDA_HOME ?= /opt/cuda
+CU=$(CUDA_HOME)/bin/nvcc
 CC=clang++
 LIBS=-lcublas
 CPP_SOURCE=./src/cpp
