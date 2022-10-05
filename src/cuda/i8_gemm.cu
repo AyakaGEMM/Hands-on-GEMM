@@ -465,6 +465,8 @@ __global__ void dequantFloatMatrix(
     const int M,
     const int N,
     const int K,
+    const float alpha,
+    const float beta,
     const int32_t *zeroPointsA, const int32_t *zeroPointsB,
     const float *scalesA, const float *scalesB,
     const int32_t *sumsA, const int32_t *sumsB,
@@ -497,8 +499,13 @@ __global__ void dequantFloatMatrix(
         if (baseX + tx < M && baseY + ty < N)
         {
             auto baseA = input[(baseX + tx) * N + baseY + ty];
-            output[(baseX + tx) * N + baseY + ty] = scaleA * scaleB[ty] *
-                                                    (baseA - zeroPointA * sumB[ty] - zeroPointB[ty] * sumA[tx] + K * zeroPointA * zeroPointB[ty]);
+            if (beta == 0)
+                output[(baseX + tx) * N + baseY + ty] = alpha * scaleA * scaleB[ty] *
+                                                        (baseA - zeroPointA * sumB[ty] - zeroPointB[ty] * sumA[tx] + K * zeroPointA * zeroPointB[ty]);
+            else
+                output[(baseX + tx) * N + baseY + ty] = alpha * scaleA * scaleB[ty] *
+                                                            (baseA - zeroPointA * sumB[ty] - zeroPointB[ty] * sumA[tx] + K * zeroPointA * zeroPointB[ty]) +
+                                                        beta * output[(baseX + tx) * N + baseY + ty];
         }
     }
 }
@@ -562,6 +569,6 @@ void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t han
                  CUBLAS_COMPUTE_32I, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
 
 #ifdef __CUDACC__ // workaround for stupid vscode intellisense
-    dequantFloatMatrix<<<numDequantBlocks, threadsPerBlock>>>(quantC, M, N, K, quantA.zeroPointsPtr(), quantB.zeroPointsPtr(), quantA.scalesPtr(), quantB.scalesPtr(), quantA.sumsPtr(), quantB.sumsPtr(), c);
+    dequantFloatMatrix<<<numDequantBlocks, threadsPerBlock>>>(quantC, M, N, K, alpha, beta, quantA.zeroPointsPtr(), quantB.zeroPointsPtr(), quantA.scalesPtr(), quantB.scalesPtr(), quantA.sumsPtr(), quantB.sumsPtr(), c);
 #endif
 }

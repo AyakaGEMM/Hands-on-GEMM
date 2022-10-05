@@ -79,8 +79,8 @@ int main(int argc, char **argv)
         // const int THREAD_SIZE_X = 4;
         // const bool ENABLE_DOUBLE_BUFFER = false;
 
-        float alpha = 1.0;
-        float beta = 0.0;
+        float alpha = 2.0;
+        float beta = 2.0;
 
         // 生成A的数据
         genRandomMatrix(h_A, M, K);
@@ -164,7 +164,7 @@ int main(int argc, char **argv)
                             d_B, N, d_A, K, &beta, d_C, N));
             checkCudaErrors(cudaMemcpy(h_C1, d_C, CSIZE(float), cudaMemcpyDeviceToHost));
 
-            double eps = 1.e-2; // machine zero
+            double eps = 1.e-4; // machine zero
             for (int i = 0; i < M * N; i++)
             {
                 double abs_err = fabs(h_C1[i] - h_C[i]);
