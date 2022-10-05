@@ -278,7 +278,6 @@ __device__ __forceinline__ void getSums(const T *from, T &sum, T &psum, int32_t 
     }
 }
 
-template <const int BLOCK_THREADS, const int workPerThread>
 __global__ void quantInput(
     const float *__restrict__ input,
     const int M,
@@ -293,34 +292,30 @@ __global__ void quantInput(
     using namespace cub;
 
     constexpr float kEpsilon = 1e-8f;
-    const int64_t baseIdx = (int)blockIdx.x * blockDim.x + threadIdx.x;
+    const auto tid = threadIdx.x;
+    const auto blockId = blockIdx.x;
+    const float range = *max - *min;
+    auto Tscale = range / 255;
+    const auto invScale = 255.0f / (range + kEpsilon);
+    auto TzeroPoint = int32_t(std::nearbyintf(127 - *max * invScale));
+    float sum = 0;
 
-    if (baseIdx * workPerThread < N)
+    using BlockReduceT = BlockReduce<float, 256>;
+    __shared__ BlockReduceT::TempStorage temp_storage;
+
+    for (int i = 0; i + tid < N; i += blockDim.x)
     {
-        const float *baseA = input + baseIdx * workPerThread * N;
-        auto baseOutput = output + baseIdx * workPerThread * N;
+        const auto baseA = input[blockId * N + i + tid];
+        output[blockId * N + i + tid] = climp<float, int8_t>(std::nearbyintf(baseA * invScale + TzeroPoint));
+        sum += output[blockId * N + i + tid];
+    }
 
-        const float range = *max - *min;
+    auto totalSum = BlockReduceT(temp_storage).Sum(sum);
 
-        auto Tscale = range / 255;
-        const auto invScale = 255.0f / (range + kEpsilon);
-        auto TzeroPoint = int32_t(std::nearbyintf(127 - *max * invScale));
-
-        float sum[workPerThread] = {};
-
-#pragma unroll
-        for (std::size_t col = 0; col < workPerThread * N && col + baseIdx * workPerThread * N < M * N; ++col)
-        {
-            baseOutput[col] = climp<float, int8_t>(std::nearbyintf(baseA[col] * invScale + TzeroPoint));
-            sum[col / N] += baseOutput[col];
-        }
-#pragma unroll
-        for (int i = 0; i < workPerThread; i++)
-        {
-            sums[baseIdx * workPerThread + i] = sum[i];
-        }
-
-        if (baseIdx == 0)
+    if (tid == 0)
+    {
+        sums[blockId] = totalSum;
+        if (blockId == 0)
         {
             scale = Tscale;
             zeroPoint = TzeroPoint;
@@ -415,7 +410,6 @@ __global__ void dequantFloatMatrix(
         if (baseX + tx < M && baseY + ty < N)
         {
             auto baseA = input[(baseX + tx) * N + baseY + ty];
-
             output[(baseX + tx) * N + baseY + ty] = scaleA * scaleB[ty] * (baseA - zeroPointA * sumB[ty] - zeroPointB[ty] * sumA[tx] + K * zeroPointA * zeroPointB[ty]);
         }
     }
@@ -426,7 +420,7 @@ void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t han
     constexpr int workPerThread = 2;
     constexpr int threadsPerBlockSize = 256;
     dim3 threadsPerBlock(threadsPerBlockSize);
-    dim3 numInputBlocks((M + threadsPerBlock.x * workPerThread - 1) / threadsPerBlock.x * workPerThread);
+    dim3 numInputBlocks(M);
     dim3 numWeightBlocks((N + threadsPerBlock.x * workPerThread - 1) / threadsPerBlock.x * workPerThread);
     dim3 numDequantBlocks((M + 15) / 16, (N + 15) / 16);
     static thread_local quantMatrixHolder quantA(M, K, MIN_MAX), quantB(K, N, PER_COL);
@@ -466,7 +460,7 @@ void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t han
     cub::DeviceReduce::Min(d_temp_storage, size, a, min, M * K);
 
 #ifdef __CUDACC__ // workaround for stupid vscode intellisense
-    quantInput<threadsPerBlockSize, workPerThread><<<numInputBlocks, threadsPerBlock>>>(a, M, K, max, min, quantA.dataPtr(), *quantA.scalesPtr(), *quantA.zeroPointsPtr(), quantA.sumsPtr());
+    quantInput<<<numInputBlocks, threadsPerBlock>>>(a, M, K, max, min, quantA.dataPtr(), *quantA.scalesPtr(), *quantA.zeroPointsPtr(), quantA.sumsPtr());
     quantWeight<threadsPerBlockSize, workPerThread><<<numWeightBlocks, threadsPerBlock>>>(b, K, N, quantB.dataPtr(), quantB.scalesPtr(), quantB.zeroPointsPtr(), quantB.sumsPtr());
 #endif
     int32_t i32alpha = alpha, i32beta = beta;
