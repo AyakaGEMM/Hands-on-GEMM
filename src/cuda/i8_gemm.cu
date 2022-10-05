@@ -293,7 +293,7 @@ __global__ void quantInput(
 
     constexpr float kEpsilon = 1e-8f;
     const auto tid = threadIdx.x;
-    const auto blockId = blockIdx.x;
+    const auto bid = blockIdx.x;
     const float range = *max - *min;
     auto Tscale = range / 255;
     const auto invScale = 255.0f / (range + kEpsilon);
@@ -303,19 +303,20 @@ __global__ void quantInput(
     using BlockReduceT = BlockReduce<float, 256>;
     __shared__ BlockReduceT::TempStorage temp_storage;
 
+#pragma unroll
     for (int i = 0; i + tid < N; i += blockDim.x)
     {
-        const auto baseA = input[blockId * N + i + tid];
-        output[blockId * N + i + tid] = climp<float, int8_t>(std::nearbyintf(baseA * invScale + TzeroPoint));
-        sum += output[blockId * N + i + tid];
+        const auto baseA = input[bid * N + i + tid];
+        output[bid * N + i + tid] = climp<float, int8_t>(std::nearbyintf(baseA * invScale + TzeroPoint));
+        sum += output[bid * N + i + tid];
     }
 
     auto totalSum = BlockReduceT(temp_storage).Sum(sum);
 
     if (tid == 0)
     {
-        sums[blockId] = totalSum;
-        if (blockId == 0)
+        sums[bid] = totalSum;
+        if (bid == 0)
         {
             scale = Tscale;
             zeroPoint = TzeroPoint;
@@ -323,7 +324,6 @@ __global__ void quantInput(
     }
 }
 
-template <int BLOCK_THREADS, int workPerThread>
 __global__ void quantWeight(
     const float *__restrict__ input,
     const int M,
@@ -337,39 +337,126 @@ __global__ void quantWeight(
 
     constexpr float kEpsilon = 1e-8f;
 
-    const int64_t baseIdx = blockIdx.x * blockDim.x + threadIdx.x;
-    auto baseOutput = output + baseIdx * workPerThread;
-    float sumCols[workPerThread], psumCols[workPerThread];
-#pragma unroll
-    for (int i = 0; i < workPerThread; i++)
+    using BlockReduceT = BlockReduce<float, 256, BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>;
+    using BlockReduceS = BlockReduce<int32_t, 256, BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>;
+
+    __shared__ BlockReduceT::TempStorage temp_sum_storage[4], temp_psum_storage[4];
+    __shared__ BlockReduceS::TempStorage temp_col_storage[4];
+
+    const int64_t baseIdx = blockIdx.x * 4;
+    const auto tid = threadIdx.x;
+    auto &baseOutput = *reinterpret_cast<float4 *>(&output[baseIdx + tid * N]);
+    float sumCols[4] = {}, psumCols[4] = {};
+    __shared__ float scale[4], invScale[4];
+    __shared__ int32_t zeroPoint[4];
+    int32_t sum[4] = {};
+
+    const auto maxWork = std::min<int64_t>(4, N - baseIdx);
+
+    switch (maxWork)
     {
-        sumCols[i] = psumCols[i] = 0;
+    case 1:
+#pragma unroll
+        for (int i = 0; i + tid < M; i += 256) // Read float4 at once, which is essential here.
+        {
+            auto tmp = input[baseIdx + (i + tid) * N];
+            sumCols[0] = tmp;
+            psumCols[0] = tmp * tmp;
+        }
+        break;
+    case 2:
+#pragma unroll
+        for (int i = 0; i + tid < M; i += 256) // Read float4 at once, which is essential here.
+        {
+            auto tmp = *reinterpret_cast<const float2 *>(input + baseIdx + (i + tid) * N);
+            sumCols[0] = tmp.x;
+            psumCols[0] = tmp.x * tmp.x;
+            sumCols[1] = tmp.y;
+            psumCols[1] = tmp.y * tmp.y;
+        }
+        break;
+    case 3:
+#pragma unroll
+        for (int i = 0; i + tid < M; i += 256) // Read float4 at once, which is essential here.
+        {
+            auto tmp = *reinterpret_cast<const float3 *>(input + baseIdx + (i + tid) * N);
+            sumCols[0] = tmp.x;
+            psumCols[0] = tmp.x * tmp.x;
+            sumCols[1] = tmp.y;
+            psumCols[1] = tmp.y * tmp.y;
+            sumCols[2] = tmp.z;
+            psumCols[2] = tmp.z * tmp.z;
+        }
+        break;
+    default:
+#pragma unroll
+        for (int i = 0; i + tid < M; i += 256) // Read float4 at once, which is essential here.
+        {
+            auto tmp = *reinterpret_cast<const float4 *>(input + baseIdx + (i + tid) * N);
+            sumCols[0] = tmp.x;
+            psumCols[0] = tmp.x * tmp.x;
+            sumCols[1] = tmp.y;
+            psumCols[1] = tmp.y * tmp.y;
+            sumCols[2] = tmp.z;
+            psumCols[2] = tmp.z * tmp.z;
+            sumCols[3] = tmp.w;
+            psumCols[3] = tmp.w * tmp.w;
+        }
+        break;
     }
 
 #pragma unroll
-    for (int i = 0; i + baseIdx * workPerThread < N && i < workPerThread; i++)
+    for (int i = 0; i < maxWork; i++)
     {
-        auto col = i + baseIdx * workPerThread;
-        getSums<float>(input + col, sumCols[i], psumCols[i], M, N);
-        const float mean = sumCols[i] / M;
-        const float stdDevs = sqrtf(psumCols[i] / M - mean * mean);
-        // Here 7 is a magic number(a.k.a. hyper-parameter)
-        const float min = mean - 7 * stdDevs, max = mean + 7 * stdDevs;
-        const float range = max - min;
+        sumCols[i] = BlockReduceT(temp_sum_storage[i]).Sum(sumCols[i]);
+        psumCols[i] = BlockReduceT(temp_psum_storage[i]).Sum(psumCols[i]);
+    }
 
-        scales[col] = range / 255;
-        const auto invScale = 255.0f / (range + kEpsilon);
-        zeroPoints[col] = int32_t(std::nearbyintf(127 - max * invScale));
+    if (tid == 0) // cal scale and zero point, and broadcast to the whole block
+    {
+#pragma unroll
+        for (int i = 0; i < maxWork; i++)
+        {
+            const float mean = sumCols[i] / M;
+            const float stdDevs = sqrtf(psumCols[i] / M - mean * mean);
+            // Here 7 is a magic number(a.k.a. hyper-parameter)
+            const float min = mean - 7 * stdDevs, max = mean + 7 * stdDevs;
+            const float range = max - min;
+            scale[i] = range / 255;
+            invScale[i] = 255 / (range + kEpsilon);
+            zeroPoint[i] = int32_t(std::nearbyintf(127 - max * invScale[i]));
+        }
+    }
 
-        int32_t sum = 0;
+    __syncthreads();
 
 #pragma unroll
-        for (std::size_t row = 0; row < M; ++row)
+    for (int i = 0; i + tid < M; i += 256)
+    {
+        const auto workId = i + tid;
+#pragma unroll
+        for (int j = 0; j < maxWork; j++)
         {
-            baseOutput[row * N + i] = climp<float, int8_t>(std::nearbyintf(input[col + row * N] * invScale + zeroPoints[col]));
-            sum += baseOutput[row * N + i];
+            output[baseIdx + workId * N + j] = climp<float, int8_t>(std::nearbyintf(input[baseIdx + workId * N + j] * invScale[j] + zeroPoint[j]));
+            sum[j] += output[baseIdx + workId * N + j];
         }
-        sums[col] = sum;
+    }
+
+#pragma unroll
+    for (int i = 0; i < maxWork; i++)
+    {
+        sum[i] = BlockReduceS(temp_col_storage[i]).Sum(sum[i]);
+    }
+
+    if (tid == 0)
+    {
+#pragma unroll
+        for (int i = 0; i < maxWork; i++) // write back
+        {
+            sums[baseIdx + i] = sum[i];
+            zeroPoints[baseIdx + i] = zeroPoint[i];
+            scales[baseIdx + i] = scale[i];
+        }
     }
 }
 
@@ -410,7 +497,8 @@ __global__ void dequantFloatMatrix(
         if (baseX + tx < M && baseY + ty < N)
         {
             auto baseA = input[(baseX + tx) * N + baseY + ty];
-            output[(baseX + tx) * N + baseY + ty] = scaleA * scaleB[ty] * (baseA - zeroPointA * sumB[ty] - zeroPointB[ty] * sumA[tx] + K * zeroPointA * zeroPointB[ty]);
+            output[(baseX + tx) * N + baseY + ty] = scaleA * scaleB[ty] *
+                                                    (baseA - zeroPointA * sumB[ty] - zeroPointB[ty] * sumA[tx] + K * zeroPointA * zeroPointB[ty]);
         }
     }
 }
@@ -421,7 +509,7 @@ void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t han
     constexpr int threadsPerBlockSize = 256;
     dim3 threadsPerBlock(threadsPerBlockSize);
     dim3 numInputBlocks(M);
-    dim3 numWeightBlocks((N + threadsPerBlock.x * workPerThread - 1) / threadsPerBlock.x * workPerThread);
+    dim3 numWeightBlocks((N + 3) / 4);
     dim3 numDequantBlocks((M + 15) / 16, (N + 15) / 16);
     static thread_local quantMatrixHolder quantA(M, K, MIN_MAX), quantB(K, N, PER_COL);
 
@@ -461,9 +549,9 @@ void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t han
 
 #ifdef __CUDACC__ // workaround for stupid vscode intellisense
     quantInput<<<numInputBlocks, threadsPerBlock>>>(a, M, K, max, min, quantA.dataPtr(), *quantA.scalesPtr(), *quantA.zeroPointsPtr(), quantA.sumsPtr());
-    quantWeight<threadsPerBlockSize, workPerThread><<<numWeightBlocks, threadsPerBlock>>>(b, K, N, quantB.dataPtr(), quantB.scalesPtr(), quantB.zeroPointsPtr(), quantB.sumsPtr());
+    quantWeight<<<numWeightBlocks, threadsPerBlock>>>(b, K, N, quantB.dataPtr(), quantB.scalesPtr(), quantB.zeroPointsPtr(), quantB.sumsPtr());
 #endif
-    int32_t i32alpha = alpha, i32beta = beta;
+    constexpr int32_t i32alpha = 1, i32beta = 0;
     cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N,
                  N, M, K,
                  &i32alpha,
