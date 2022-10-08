@@ -60,7 +60,7 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 
     int colA = baseIdx >> 1, colB = baseIdx >> 5, rowA = (baseIdx & 1) << 2, rowB = (baseIdx << 2) & 127;
     int warpId = baseIdx >> 5, warpBaseId = baseIdx & 31;
-    int colC = ((warpId >> 1 << 2) + (warpBaseId & 3)) << 3, rowC = (((warpId & 1) << 3) + (warpBaseId >> 2)) << 3;
+    int colC = ((warpId >> 1 << 3) + (warpBaseId & 3)) << 2, rowC = (((warpId & 1) << 4) + (warpBaseId >> 2)) << 2;
     float *baseC = C + (baseX + colC) * N + baseY + rowC;
 
     for (int i = 0; i < K; i += BLOCK_K)
@@ -78,10 +78,10 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
         for (int ii = 0; ii < BLOCK_K; ii++)
         {
             regA[0] = *reinterpret_cast<float4 *>(&subA[colC + ii * BLOCK_M]);
-            regA[1] = *reinterpret_cast<float4 *>(&subA[(colC + 4) + ii * BLOCK_M]);
+            regA[1] = *reinterpret_cast<float4 *>(&subA[(colC + 16) + ii * BLOCK_M]);
 
             regB[0] = *reinterpret_cast<float4 *>(&subB[rowC + BLOCK_N * ii]);
-            regB[1] = *reinterpret_cast<float4 *>(&subB[rowC + 4 + BLOCK_N * ii]);
+            regB[1] = *reinterpret_cast<float4 *>(&subB[rowC + 32 + BLOCK_N * ii]);
 
 #pragma unroll
             for (int cpi = 0; cpi < BLOCK_M_COMPUTE / 4; cpi++)
@@ -115,17 +115,36 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     }
 
 #pragma unroll
-    for (int i = 0; i < BLOCK_M_COMPUTE; i++)
-#pragma unroll
-        for (int j = 0; j < BLOCK_N_COMPUTE; j += 4)
-        {
-            *reinterpret_cast<float4 *>(&regA[0]) = *reinterpret_cast<float4 *>(&baseC[i * N + j]);
-            regA[0].x = regA[0].x * beta + alpha * c[i * BLOCK_M_COMPUTE + j];
-            regA[0].y = regA[0].y * beta + alpha * c[i * BLOCK_M_COMPUTE + j + 1];
-            regA[0].z = regA[0].z * beta + alpha * c[i * BLOCK_M_COMPUTE + j + 2];
-            regA[0].w = regA[0].w * beta + alpha * c[i * BLOCK_M_COMPUTE + j + 3];
-            *reinterpret_cast<float4 *>(&baseC[i * N + j]) = *reinterpret_cast<float4 *>(&regA[0]);
-        }
+    for (int i = 0; i < 4; i++)
+    {
+        *reinterpret_cast<float4 *>(&regA[0]) = *reinterpret_cast<float4 *>(&baseC[i * N]);
+        regA[0].x = regA[0].x * beta + alpha * c[i * BLOCK_N_COMPUTE];
+        regA[0].y = regA[0].y * beta + alpha * c[1 + i * BLOCK_N_COMPUTE];
+        regA[0].z = regA[0].z * beta + alpha * c[2 + i * BLOCK_N_COMPUTE];
+        regA[0].w = regA[0].w * beta + alpha * c[3 + i * BLOCK_N_COMPUTE];
+        *reinterpret_cast<float4 *>(&baseC[i * N]) = *reinterpret_cast<float4 *>(&regA[0]);
+
+        *reinterpret_cast<float4 *>(&regA[0]) = *reinterpret_cast<float4 *>(&baseC[i * N + 32]);
+        regA[0].x = regA[0].x * beta + alpha * c[4 + i * BLOCK_N_COMPUTE];
+        regA[0].y = regA[0].y * beta + alpha * c[5 + i * BLOCK_N_COMPUTE];
+        regA[0].z = regA[0].z * beta + alpha * c[6 + i * BLOCK_N_COMPUTE];
+        regA[0].w = regA[0].w * beta + alpha * c[7 + i * BLOCK_N_COMPUTE];
+        *reinterpret_cast<float4 *>(&baseC[i * N + 32]) = *reinterpret_cast<float4 *>(&regA[0]);
+
+        *reinterpret_cast<float4 *>(&regA[0]) = *reinterpret_cast<float4 *>(&baseC[(i + 16) * N]);
+        regA[0].x = regA[0].x * beta + alpha * c[32 + i * BLOCK_N_COMPUTE];
+        regA[0].y = regA[0].y * beta + alpha * c[33 + i * BLOCK_N_COMPUTE];
+        regA[0].z = regA[0].z * beta + alpha * c[34 + i * BLOCK_N_COMPUTE];
+        regA[0].w = regA[0].w * beta + alpha * c[35 + i * BLOCK_N_COMPUTE];
+        *reinterpret_cast<float4 *>(&baseC[(i + 16) * N]) = *reinterpret_cast<float4 *>(&regA[0]);
+
+        *reinterpret_cast<float4 *>(&regA[0]) = *reinterpret_cast<float4 *>(&baseC[(i + 16) * N + 32]);
+        regA[0].x = regA[0].x * beta + alpha * c[36 + i * BLOCK_N_COMPUTE];
+        regA[0].y = regA[0].y * beta + alpha * c[37 + i * BLOCK_N_COMPUTE];
+        regA[0].z = regA[0].z * beta + alpha * c[38 + i * BLOCK_N_COMPUTE];
+        regA[0].w = regA[0].w * beta + alpha * c[39 + i * BLOCK_N_COMPUTE];
+        *reinterpret_cast<float4 *>(&baseC[(i + 16) * N + 32]) = *reinterpret_cast<float4 *>(&regA[0]);
+    }
 }
 
 void sgemm(int M, int N, int K, float *a, float *b, float *c, float alpha = 1, float beta = 0)

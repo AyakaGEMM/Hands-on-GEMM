@@ -167,7 +167,9 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
         }
     }
 
+#pragma unroll
     for (int i = 0; i < BLOCK_M_COMPUTE; i++)
+#pragma unroll
         for (int j = 0; j < BLOCK_N_COMPUTE; j += 4)
         {
             preA = *reinterpret_cast<float4 *>(&baseC[i * N + j]);
