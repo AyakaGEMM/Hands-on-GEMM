@@ -62,7 +62,7 @@ int main(int argc, char **argv)
 
     for (const auto &i : test_sizes)
     {
-        size_t M = i;
+        size_t M = i - 1;
         size_t K = i;
         size_t N = i;
 

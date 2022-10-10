@@ -98,8 +98,8 @@ int main(int argc, char **argv)
 
     checkCudaErrors(cudaMemcpy(h_C1, d_C, CSIZE(float), cudaMemcpyDeviceToHost));
 
-    // showMatrix(h_C, M, N, "Matrix C1");
-    // showMatrix(h_C1, M, N, "Matrix C2");
+    showMatrix(h_C, M, N, "Matrix C1");
+    showMatrix(h_C1, M, N, "Matrix C2");
 
     checkCudaErrors(cudaFree(d_A));
     checkCudaErrors(cudaFree(d_B));
