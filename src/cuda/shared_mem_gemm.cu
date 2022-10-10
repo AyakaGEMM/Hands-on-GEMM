@@ -55,21 +55,21 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     float4 regB[BLOCK_M_COMPUTE / 4]; // hopefully, these should reside in register.
     float4 regA[BLOCK_M_COMPUTE / 4];
 
-    const float *baseA = A + baseX * K;
-    const float *baseB = B + baseY;
-    float *baseC = C + (baseX + threadIdx.x * BLOCK_M_COMPUTE) * N + baseY + threadIdx.y * BLOCK_N_COMPUTE;
+    const float *baseA = A + baseY * K;
+    const float *baseB = B + baseX;
+    float *baseC = C + (baseY + threadIdx.x * BLOCK_M_COMPUTE) * N + baseX + threadIdx.y * BLOCK_N_COMPUTE;
 
-    int colA = baseIdx / 2, colB = baseIdx / (BLOCK_N / 4), rowA = (baseIdx & 1) * 4, rowB = (baseIdx * 4) % BLOCK_N;
+    int rowA = baseIdx / 2, rowB = baseIdx / (BLOCK_N / 4), colA = (baseIdx & 1) * 4, colB = (baseIdx * 4) % BLOCK_N;
 
     for (int i = 0; i < K; i += BLOCK_K)
     {
-        regB[0] = *reinterpret_cast<const float4 *>(baseB + i * N + colB * N + rowB);
-        regA[0] = *reinterpret_cast<const float4 *>(baseA + i + colA * K + rowA);
+        regB[0] = *reinterpret_cast<const float4 *>(baseB + i * N + rowB * N + colB);
+        regA[0] = *reinterpret_cast<const float4 *>(baseA + i + rowA * K + colA);
         *reinterpret_cast<float4 *>(&subB[baseIdx * 4]) = regB[0];
-        subA[colA + rowA * BLOCK_M] = regA[0].x;
-        subA[colA + (rowA + 1) * BLOCK_M] = regA[0].y;
-        subA[colA + (rowA + 2) * BLOCK_M] = regA[0].z;
-        subA[colA + (rowA + 3) * BLOCK_M] = regA[0].w;
+        subA[rowA + colA * BLOCK_M] = regA[0].x;
+        subA[rowA + (colA + 1) * BLOCK_M] = regA[0].y;
+        subA[rowA + (colA + 2) * BLOCK_M] = regA[0].z;
+        subA[rowA + (colA + 3) * BLOCK_M] = regA[0].w;
 
         __syncthreads();
 #pragma unroll

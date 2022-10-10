@@ -16,7 +16,7 @@ FLAGS=-gencode=arch=compute_70,code=sm_70 \
     -gencode=arch=compute_80,code=sm_80
 OPTI=-O3  
 DEBUG=--debug -g -G -O0
-PTXAS_FLAGS=--ptxas-options=-v --expt-relaxed-constexpr
+PTXAS_FLAGS=--ptxas-options=-v --expt-relaxed-constexpr -lineinfo
 
 Wno=-Xcudafe "--diag_suppress=declared_but_not_referenced" -Wno-deprecated-gpu-targets
 
