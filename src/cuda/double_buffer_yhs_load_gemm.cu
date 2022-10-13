@@ -60,16 +60,24 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 
     auto compute_stage_idx = 0;
 
-    int rowA = baseIdx >> 1, rowB = baseIdx >> 5, colA = (baseIdx & 1) << 2, colB = (baseIdx << 2) & 127;
+    int rowA = baseIdx >> 1, rowB = baseIdx >> 5, colA = (baseIdx & 1) << 2, colB = baseIdx & 31;
     int warpId = baseIdx >> 5, warpBaseId = baseIdx & 31;
     int rowC = ((warpId >> 1 << 3) + ((warpBaseId >> 4) << 1) + (warpBaseId & 1)) << 2, colC = (((warpId & 1) << 4) + ((warpBaseId & 15) >> 1)) << 2;
     float *baseC = C + (baseY + rowC) * N + baseX + colC;
 
     float4 preA, preB;
 
-    preB = *reinterpret_cast<const float4 *>(baseB + rowB * N + colB);
+    preB.x = baseB[rowB * N + colB];
+    preB.y = baseB[rowB * N + colB + 32];
+    preB.z = baseB[rowB * N + colB + 32 * 2];
+    preB.w = baseB[rowB * N + colB + 32 * 3];
     preA = *reinterpret_cast<const float4 *>(baseA + rowA * K + colA);
-    *reinterpret_cast<float4 *>(&subB[0][baseIdx * 4]) = preB;
+
+    subB[0][(baseIdx / 32) * BLOCK_N + (baseIdx & 31)] = preB.x;
+    subB[0][(baseIdx / 32) * BLOCK_N + (baseIdx & 31) + 32] = preB.y;
+    subB[0][(baseIdx / 32) * BLOCK_N + (baseIdx & 31) + 32 * 2] = preB.z;
+    subB[0][(baseIdx / 32) * BLOCK_N + (baseIdx & 31) + 32 * 3] = preB.w;
+
     subA[0][rowA + colA * subAlda] = preA.x;
     subA[0][rowA + (colA + 1) * subAlda] = preA.y;
     subA[0][rowA + (colA + 2) * subAlda] = preA.z;
@@ -79,7 +87,10 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 
     for (int i = BLOCK_K; i < K; i += BLOCK_K)
     {
-        preB = *reinterpret_cast<const float4 *>(baseB + i * N + rowB * N + colB);
+        preB.x = baseB[rowB * N + i * N + colB];
+        preB.y = baseB[rowB * N + i * N + colB + 32];
+        preB.z = baseB[rowB * N + i * N + colB + 32 * 2];
+        preB.w = baseB[rowB * N + i * N + colB + 32 * 3];
         preA = *reinterpret_cast<const float4 *>(baseA + i + rowA * K + colA);
 
 #pragma unroll
@@ -89,7 +100,7 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
             regB[1] = *reinterpret_cast<float4 *>(&subB[compute_stage_idx][colC + 32 + BLOCK_N * ii]);
 
             regA[0] = *reinterpret_cast<float4 *>(&subA[compute_stage_idx][rowC + ii * subAlda]);
-            regA[1] = *reinterpret_cast<float4 *>(&subA[compute_stage_idx][(rowC + 16) + ii * subAlda]);
+            regA[1] = *reinterpret_cast<float4 *>(&subA[compute_stage_idx][rowC + 16 + ii * subAlda]);
 
 #pragma unroll
             for (int cpi = 0; cpi < BLOCK_M_COMPUTE / 4; cpi++)
@@ -122,7 +133,11 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 
         compute_stage_idx ^= 1;
 
-        *reinterpret_cast<float4 *>(&subB[compute_stage_idx][baseIdx * 4]) = preB;
+        subB[compute_stage_idx][(baseIdx / 32) * BLOCK_N + (baseIdx & 31)] = preB.x;
+        subB[compute_stage_idx][(baseIdx / 32) * BLOCK_N + (baseIdx & 31) + 32] = preB.y;
+        subB[compute_stage_idx][(baseIdx / 32) * BLOCK_N + (baseIdx & 31) + 32 * 2] = preB.z;
+        subB[compute_stage_idx][(baseIdx / 32) * BLOCK_N + (baseIdx & 31) + 32 * 3] = preB.w;
+
         subA[compute_stage_idx][rowA + colA * subAlda] = preA.x;
         subA[compute_stage_idx][rowA + (colA + 1) * subAlda] = preA.y;
         subA[compute_stage_idx][rowA + (colA + 2) * subAlda] = preA.z;
@@ -171,33 +186,33 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 #pragma unroll
     for (int i = 0; i < 4; i++)
     {
-        *reinterpret_cast<float4 *>(&regA[0]) = *reinterpret_cast<float4 *>(&baseC[i * N]);
-        regA[0].x = regA[0].x * beta + alpha * c[i * BLOCK_N_COMPUTE];
-        regA[0].y = regA[0].y * beta + alpha * c[1 + i * BLOCK_N_COMPUTE];
-        regA[0].z = regA[0].z * beta + alpha * c[2 + i * BLOCK_N_COMPUTE];
-        regA[0].w = regA[0].w * beta + alpha * c[3 + i * BLOCK_N_COMPUTE];
-        *reinterpret_cast<float4 *>(&baseC[i * N]) = *reinterpret_cast<float4 *>(&regA[0]);
+        *reinterpret_cast<float4 *>(&preA) = *reinterpret_cast<float4 *>(&baseC[i * N]);
+        preA.x = preA.x * beta + alpha * c[i * BLOCK_N_COMPUTE];
+        preA.y = preA.y * beta + alpha * c[1 + i * BLOCK_N_COMPUTE];
+        preA.z = preA.z * beta + alpha * c[2 + i * BLOCK_N_COMPUTE];
+        preA.w = preA.w * beta + alpha * c[3 + i * BLOCK_N_COMPUTE];
+        *reinterpret_cast<float4 *>(&baseC[i * N]) = *reinterpret_cast<float4 *>(&preA);
 
-        *reinterpret_cast<float4 *>(&regA[0]) = *reinterpret_cast<float4 *>(&baseC[i * N + 32]);
-        regA[0].x = regA[0].x * beta + alpha * c[4 + i * BLOCK_N_COMPUTE];
-        regA[0].y = regA[0].y * beta + alpha * c[5 + i * BLOCK_N_COMPUTE];
-        regA[0].z = regA[0].z * beta + alpha * c[6 + i * BLOCK_N_COMPUTE];
-        regA[0].w = regA[0].w * beta + alpha * c[7 + i * BLOCK_N_COMPUTE];
-        *reinterpret_cast<float4 *>(&baseC[i * N + 32]) = *reinterpret_cast<float4 *>(&regA[0]);
+        *reinterpret_cast<float4 *>(&preA) = *reinterpret_cast<float4 *>(&baseC[i * N + 32]);
+        preA.x = preA.x * beta + alpha * c[4 + i * BLOCK_N_COMPUTE];
+        preA.y = preA.y * beta + alpha * c[5 + i * BLOCK_N_COMPUTE];
+        preA.z = preA.z * beta + alpha * c[6 + i * BLOCK_N_COMPUTE];
+        preA.w = preA.w * beta + alpha * c[7 + i * BLOCK_N_COMPUTE];
+        *reinterpret_cast<float4 *>(&baseC[i * N + 32]) = *reinterpret_cast<float4 *>(&preA);
 
-        *reinterpret_cast<float4 *>(&regA[0]) = *reinterpret_cast<float4 *>(&baseC[(i + 16) * N]);
-        regA[0].x = regA[0].x * beta + alpha * c[32 + i * BLOCK_N_COMPUTE];
-        regA[0].y = regA[0].y * beta + alpha * c[33 + i * BLOCK_N_COMPUTE];
-        regA[0].z = regA[0].z * beta + alpha * c[34 + i * BLOCK_N_COMPUTE];
-        regA[0].w = regA[0].w * beta + alpha * c[35 + i * BLOCK_N_COMPUTE];
-        *reinterpret_cast<float4 *>(&baseC[(i + 16) * N]) = *reinterpret_cast<float4 *>(&regA[0]);
+        *reinterpret_cast<float4 *>(&preA) = *reinterpret_cast<float4 *>(&baseC[(i + 16) * N]);
+        preA.x = preA.x * beta + alpha * c[32 + i * BLOCK_N_COMPUTE];
+        preA.y = preA.y * beta + alpha * c[33 + i * BLOCK_N_COMPUTE];
+        preA.z = preA.z * beta + alpha * c[34 + i * BLOCK_N_COMPUTE];
+        preA.w = preA.w * beta + alpha * c[35 + i * BLOCK_N_COMPUTE];
+        *reinterpret_cast<float4 *>(&baseC[(i + 16) * N]) = *reinterpret_cast<float4 *>(&preA);
 
-        *reinterpret_cast<float4 *>(&regA[0]) = *reinterpret_cast<float4 *>(&baseC[(i + 16) * N + 32]);
-        regA[0].x = regA[0].x * beta + alpha * c[36 + i * BLOCK_N_COMPUTE];
-        regA[0].y = regA[0].y * beta + alpha * c[37 + i * BLOCK_N_COMPUTE];
-        regA[0].z = regA[0].z * beta + alpha * c[38 + i * BLOCK_N_COMPUTE];
-        regA[0].w = regA[0].w * beta + alpha * c[39 + i * BLOCK_N_COMPUTE];
-        *reinterpret_cast<float4 *>(&baseC[(i + 16) * N + 32]) = *reinterpret_cast<float4 *>(&regA[0]);
+        *reinterpret_cast<float4 *>(&preA) = *reinterpret_cast<float4 *>(&baseC[(i + 16) * N + 32]);
+        preA.x = preA.x * beta + alpha * c[36 + i * BLOCK_N_COMPUTE];
+        preA.y = preA.y * beta + alpha * c[37 + i * BLOCK_N_COMPUTE];
+        preA.z = preA.z * beta + alpha * c[38 + i * BLOCK_N_COMPUTE];
+        preA.w = preA.w * beta + alpha * c[39 + i * BLOCK_N_COMPUTE];
+        *reinterpret_cast<float4 *>(&baseC[(i + 16) * N + 32]) = *reinterpret_cast<float4 *>(&preA);
     }
 }
 

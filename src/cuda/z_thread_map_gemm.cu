@@ -48,8 +48,9 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 
     float c[BLOCK_M_COMPUTE * BLOCK_N_COMPUTE] = {};
     float resC[BLOCK_M_COMPUTE * BLOCK_N_COMPUTE] = {};
+    constexpr size_t subAlda = BLOCK_M + 4; // plus 4 here to avoid bank conflict and maintain float4 read
 
-    __shared__ float subA[BLOCK_M * BLOCK_K];
+    __shared__ float subA[subAlda * BLOCK_K];
     __shared__ float subB[BLOCK_N * BLOCK_K];
 
     float4 regB[BLOCK_M_COMPUTE / 4]; // hopefully, these should reside in register.
@@ -60,7 +61,7 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 
     int rowA = baseIdx >> 1, rowB = baseIdx >> 5, colA = (baseIdx & 1) << 2, colB = (baseIdx << 2) & 127;
     int warpId = baseIdx >> 5, warpBaseId = baseIdx & 31;
-    int rowC = ((warpId >> 1 << 3) + (warpBaseId & 3)) << 2, colC = (((warpId & 1) << 4) + (warpBaseId >> 2)) << 2;
+    int rowC = ((warpId >> 1 << 3) + ((warpBaseId >> 4) << 1) + (warpBaseId & 1)) << 2, colC = (((warpId & 1) << 4) + ((warpBaseId & 15) >> 1)) << 2;
     float *baseC = C + (baseY + rowC) * N + baseX + colC;
 
     for (int i = 0; i < K; i += BLOCK_K)
@@ -68,10 +69,10 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
         regB[0] = *reinterpret_cast<const float4 *>(baseB + i * N + rowB * N + colB);
         regA[0] = *reinterpret_cast<const float4 *>(baseA + i + rowA * K + colA);
         *reinterpret_cast<float4 *>(&subB[baseIdx * 4]) = regB[0];
-        subA[rowA + colA * BLOCK_M] = regA[0].x;
-        subA[rowA + (colA + 1) * BLOCK_M] = regA[0].y;
-        subA[rowA + (colA + 2) * BLOCK_M] = regA[0].z;
-        subA[rowA + (colA + 3) * BLOCK_M] = regA[0].w;
+        subA[rowA + colA * subAlda] = regA[0].x;
+        subA[rowA + (colA + 1) * subAlda] = regA[0].y;
+        subA[rowA + (colA + 2) * subAlda] = regA[0].z;
+        subA[rowA + (colA + 3) * subAlda] = regA[0].w;
 
         __syncthreads();
 #pragma unroll
@@ -80,8 +81,8 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
             regB[0] = *reinterpret_cast<float4 *>(&subB[colC + BLOCK_N * ii]);
             regB[1] = *reinterpret_cast<float4 *>(&subB[colC + 32 + BLOCK_N * ii]);
 
-            regA[0] = *reinterpret_cast<float4 *>(&subA[rowC + ii * BLOCK_M]);
-            regA[1] = *reinterpret_cast<float4 *>(&subA[(rowC + 16) + ii * BLOCK_M]);
+            regA[0] = *reinterpret_cast<float4 *>(&subA[rowC + ii * subAlda]);
+            regA[1] = *reinterpret_cast<float4 *>(&subA[(rowC + 16) + ii * subAlda]);
 
 #pragma unroll
             for (int cpi = 0; cpi < BLOCK_M_COMPUTE / 4; cpi++)
@@ -113,7 +114,6 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
         }
         __syncthreads();
     }
-
 #pragma unroll
     for (int i = 0; i < 4; i++)
     {
