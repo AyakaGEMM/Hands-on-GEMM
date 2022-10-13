@@ -61,6 +61,11 @@ benchmark_%: $(BUILD)/benchmark.o $(BUILD)/%_gemm.o
 	$(CU) $^ -std=$(STD) $(OPTI) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
 	# sh ${SCRIPT_SOURCE}/$@.sh
 
+sb_%: $(BUILD)/single-benchmark.o $(BUILD)/%_gemm.o
+	mkdir -p $(BIN)
+	$(CU) $^ -std=$(STD) $(OPTI) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+	# sh ${SCRIPT_SOURCE}/$@.sh
+
 i8benchmark: $(BUILD)/i8-benchmark.o $(BUILD)/i8_gemm.o
 	mkdir -p $(BIN)
 	$(CU) $^ -std=$(STD) $(OPTI) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
