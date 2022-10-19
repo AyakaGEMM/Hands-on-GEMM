@@ -512,7 +512,6 @@ __global__ void dequantFloatMatrix(
 
 void sgemm(int M, int N, int K, float *a, float *b, float *c, cublasHandle_t handle, float alpha = 1, float beta = 0)
 {
-    constexpr int workPerThread = 2;
     constexpr int threadsPerBlockSize = 256;
     dim3 threadsPerBlock(threadsPerBlockSize);
     dim3 numInputBlocks(M);

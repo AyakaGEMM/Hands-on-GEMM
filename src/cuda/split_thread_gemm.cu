@@ -23,18 +23,6 @@ constexpr int shared_memory_size = shared_memory_element * sizeof(float); // sha
 #define colM(a, i, j, lda) a[((j) * (lda)) + (i)]
 #define rowM(a, i, j, lda) a[(j) + (i) * (lda)]
 
-constexpr __forceinline__ __device__ auto convertColIdx(int idx, const float *begin, int subM, int subN, int N)
-{
-    int m = idx / subM, n = idx % subM;
-    return begin + m + n * N;
-}
-
-constexpr __forceinline__ __device__ auto convertRowIdx(int idx, const float *begin, int subM, int subN, int N)
-{
-    int m = idx / subN, n = idx % subN;
-    return begin + m * N + n;
-}
-
 __global__ void matrixMul(const float *A, const float *B, float *C,
                           int M, int N, int K, float alpha, float beta)
 {
