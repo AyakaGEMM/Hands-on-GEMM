@@ -73,9 +73,6 @@ __device__ __forceinline__ uint32_t smem_u32addr(const void *smem_ptr)
     return addr;
 }
 
-//#define subA reinterpret_cast<float *>(addrA)
-//#define subB reinterpret_cast<float *>(addrB)
-
 __global__ void matrixMul(const float *A, const float *B, float *C,
                           int M, int N, int K, float alpha, float beta)
 {
@@ -89,9 +86,6 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 
     float c[BLOCK_M_COMPUTE * BLOCK_N_COMPUTE] = {};
     constexpr size_t subAlda = BLOCK_M + 4; // plus 4 here to avoid bank conflict and maintain float4 read
-
-    //__shared__ float subA[2][subAlda * BLOCK_K];
-    //__shared__ float subB[2][BLOCK_N * BLOCK_K];
 
     __shared__ __align__(16 * 1024) char smem[6 * 4 * 1024];
     auto subA = reinterpret_cast<float *>(smem);

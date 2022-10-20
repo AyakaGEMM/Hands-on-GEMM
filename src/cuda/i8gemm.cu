@@ -23,6 +23,26 @@ constexpr int shared_memory_size = shared_memory_element * sizeof(float); // sha
 #define colM(a, i, j, lda) a[((j) * (lda)) + (i)]
 #define rowM(a, i, j, lda) a[(j) + (i) * (lda)]
 
+//__device__ __forceinline__ void sts32(const int8_t &reg0, const int8_t &reg1,
+//                                      const int8_t &reg2, const int8_t &reg3,
+//                                      const int8_t *addr)
+//{
+//    asm volatile(
+//        "st.shared.v4.s8 [%0], {%1, %2, %3, %4};\n"
+//        :
+//        : "l"(addr), "l"(reg0), "l"(reg1), "l"(reg2), "l"(reg3));
+//}
+//
+//__device__ __forceinline__ void lds32(int8_t &reg0, int8_t &reg1,
+//                                      int8_t &reg2, int8_t &reg3,
+//                                      const int8_t *addr)
+//{
+//    asm volatile(
+//        "ld.shared.v4.s8 {%0, %1, %2, %3}, [%4];\n"
+//        : "=l"(reg0), "=l"(reg1), "=l"(reg2), "=l"(reg3)
+//        : "l"(addr));
+//}
+
 __global__ void i8gemm8x8x128(const int8_t *A, const int8_t *B, int32_t *C,
                               int M, int N, int K, int32_t alpha, int32_t beta)
 {

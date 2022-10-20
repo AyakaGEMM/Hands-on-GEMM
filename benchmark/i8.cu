@@ -51,9 +51,9 @@ int main(int argc, char **argv)
     int8_t *d_B;
     int32_t *d_C;
 
-    checkCudaErrors(cudaMalloc(&d_A, MAXSIZE(int8_t)));
-    checkCudaErrors(cudaMalloc(&d_B, MAXSIZE(int8_t)));
-    checkCudaErrors(cudaMalloc(&d_C, MAXSIZE(int32_t)));
+    checkCudaErrors(cudaMalloc(&d_A, MAXSIZE(float)));
+    checkCudaErrors(cudaMalloc(&d_B, MAXSIZE(float)));
+    checkCudaErrors(cudaMalloc(&d_C, MAXSIZE(float)));
 
     cublasHandle_t blas_handle;
     checkCuBlasErrors(cublasCreate(&blas_handle));
@@ -66,8 +66,8 @@ int main(int argc, char **argv)
 
         printf("\nSize M: %u, N: %u, K: %u\n", M, N, K);
 
-        double msecPerMatrixMul[2] = {0, 0};
-        double gigaFlops[2] = {0, 0};
+        double msecPerMatrixMul[3] = {0, 0};
+        double gigaFlops[3] = {0, 0};
         double flopsPerMatrixMul = 2.0 * M * N * K;
 
         int32_t alpha = 1;
@@ -118,7 +118,6 @@ int main(int argc, char **argv)
 
         // cublas
         checkCudaErrors(cudaMemcpy(d_C, h_C1, CSIZE(int32_t), cudaMemcpyHostToDevice));
-        checkCudaErrors(cudaGetLastError());
         // warmup here (not sure whether we need this or not)
         checkCuBlasErrors(
             cublasGemmEx(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
@@ -140,7 +139,7 @@ int main(int argc, char **argv)
                              d_A, CUDA_R_8I, K,
                              &beta,
                              d_C, CUDA_R_32I, N,
-                             CUBLAS_COMPUTE_32I, CUBLAS_GEMM_DEFAULT));
+                             CUBLAS_COMPUTE_32I, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
         }
         checkCudaErrors(cudaEventRecord(stop));
         checkCudaErrors(cudaEventSynchronize(stop));
@@ -151,6 +150,40 @@ int main(int argc, char **argv)
         printf("CuBlas Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops,\n",
                gigaFlops[1],
                msecPerMatrixMul[1],
+               flopsPerMatrixMul);
+
+        half al = 1, be = 0;
+
+        checkCuBlasErrors(
+            cublasGemmEx(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                         N, M, K,
+                         &alpha,
+                         d_B, CUDA_R_8I, N,
+                         d_A, CUDA_R_8I, K,
+                         &beta,
+                         d_C, CUDA_R_32I, N,
+                         CUBLAS_COMPUTE_32I, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+        checkCudaErrors(cudaEventRecord(start));
+        for (int run = 0; run < nIter; run++)
+        {
+            checkCuBlasErrors(
+                cublasHgemm(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                            N, M, K,
+                            &al,
+                            reinterpret_cast<half *>(d_B), N,
+                            reinterpret_cast<half *>(d_A), K,
+                            &be,
+                            reinterpret_cast<half *>(d_C), N));
+        }
+        checkCudaErrors(cudaEventRecord(stop));
+        checkCudaErrors(cudaEventSynchronize(stop));
+        checkCudaErrors(cudaEventElapsedTime(&msecTotal, start, stop));
+
+        msecPerMatrixMul[2] = msecTotal / nIter;
+        gigaFlops[2] = (flopsPerMatrixMul * 1.0e-9f) / (msecPerMatrixMul[2] / 1000.0f);
+        printf("CuBlas fp16 Performance= %.2f GFlop/s, Time= %.3f msec, Size= %.0f Ops,\n",
+               gigaFlops[2],
+               msecPerMatrixMul[2],
                flopsPerMatrixMul);
 
         if (!ignore_error)
