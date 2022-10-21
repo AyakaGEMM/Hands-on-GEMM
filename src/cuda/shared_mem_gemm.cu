@@ -2,12 +2,6 @@
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <vector>
-#ifndef __CUDACC__
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-void __syncthreads(); // workaround __syncthreads warning
-void __syncwarp();
-#endif
 #include <iostream>
 constexpr size_t BLOCK_SIZE = 16; // we assume that every block has equal blockDim.x and blockDim.y
 constexpr size_t BLOCK_M = 128;   // These const values decide how many thing a thread compute and the amount of shared memory to allocate.

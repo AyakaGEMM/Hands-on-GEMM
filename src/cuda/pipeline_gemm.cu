@@ -2,17 +2,6 @@
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <vector>
-
-#ifndef __CUDACC__
-#define __CUDACC__
-#define __HAHA__
-#endif
-
-#include <cooperative_groups/memcpy_async.h>
-
-#ifdef __HAHA__
-#undef __CUDACC__
-#endif
 #include <cuda/pipeline>
 
 #ifndef __CUDACC__

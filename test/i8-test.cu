@@ -16,6 +16,7 @@
 int MAX;
 
 extern void i8gemm(int, int, int, int8_t *, int8_t *, int32_t *, int32_t, int32_t);
+
 void refgemm(int M, int N, int K, int8_t *a, int8_t *b, int32_t *c, int32_t alpha, int32_t beta)
 {
     memset(c, 0, sizeof(int32_t) * M * N);
