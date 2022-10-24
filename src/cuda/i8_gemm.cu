@@ -324,6 +324,28 @@ __global__ void quantInput(
     }
 }
 
+__global__ void dequantInput(
+    const float *__restrict__ input,
+    const float &scale,
+    const std::int32_t &zeroPoint,
+    const int M,
+    const int N,
+    std::int8_t *__restrict__ output)
+{
+    using namespace cub;
+
+    constexpr float kEpsilon = 1e-8f;
+    const auto tid = threadIdx.x;
+    const auto bid = blockIdx.x;
+
+#pragma unroll
+    for (int i = 0; i + tid < N; i += blockDim.x)
+    {
+        const auto baseA = input[bid * N + i + tid];
+        output[bid * N + i + tid] = (baseA - zeroPoint) * scale;
+    }
+}
+
 __global__ void quantWeight(
     const float *__restrict__ input,
     const int M,

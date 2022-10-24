@@ -19,14 +19,14 @@ extern void i8gemm(int, int, int, int8_t *, int8_t *, int32_t *, int32_t, int32_
 
 void refgemm(int M, int N, int K, int8_t *a, int8_t *b, int32_t *c, int32_t alpha, int32_t beta)
 {
-    memset(c, 0, sizeof(int32_t) * M * N);
     for (int i = 0; i < M; i++)
     {
         for (int j = 0; j < N; j++)
         {
+            c[i * N + j] *= beta;
             for (int k = 0; k < K; k++)
             {
-                c[i * N + j] += a[i * K + k] * b[k * N + j];
+                c[i * N + j] += alpha * a[i * K + k] * b[k * N + j];
             }
         }
     }
@@ -39,9 +39,9 @@ int main(int argc, char **argv)
     //     printf("usage: ./main [M] [K] [N]\n");
     //     exit(0);
     // }
-    size_t M = 128;
-    size_t N = 128;
-    size_t K = 128;
+    size_t M = 256;
+    size_t N = 256;
+    size_t K = 256;
 
     std::cout << M << " " << N << " " << K << std::endl;
 
@@ -118,7 +118,7 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaMemcpy(h_C, d_C, CSIZE(int32_t), cudaMemcpyDeviceToHost));
     showMatrix(h_C, M, N, "Matrix C1");
 
-    refgemm(M, N, K, h_A, h_B, h_C, 1, 0);
+    refgemm(M, N, K, h_A, h_B, h_C, 1, -1);
     showMatrix(h_C, M, N, "Matrix C3");
 
     checkCudaErrors(cudaFree(d_A));

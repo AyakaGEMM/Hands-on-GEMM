@@ -193,7 +193,7 @@ void genSparseMatrix(float *A, int M, int N, int sparsity)
 }
 
 template <class T>
-void copyMatrix(T *des, T *src, int M, int N)
+void copyMatrix(T *des, T *src, size_t M, size_t N)
 {
     for (int i = 0; i < M * N; i++)
     {

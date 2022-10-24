@@ -203,17 +203,13 @@ int main(int argc, char **argv)
                              CUBLAS_COMPUTE_32I, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
             checkCudaErrors(cudaMemcpy(h_C1, d_C, CSIZE(int32_t), cudaMemcpyDeviceToHost));
 
-            double eps = 1.e-4; // machine zero
             for (int i = 0; i < M * N; i++)
             {
-                double abs_err = fabs(h_C1[i] - h_C[i]);
-                double dot_length = M;
-                double abs_val = fabs(h_C[i]);
-                double rel_err = abs_err / abs_val / dot_length;
-                if (rel_err > eps)
+                int err = h_C1[i] - h_C[i];
+                if (err != 0)
                 {
-                    printf("Error! Matrix[%05d]=%.8f, ref=%.8f error term is > %E\n",
-                           i, h_C[i], h_C1[i], eps);
+                    printf("Error! Matrix[%d]=%d, ref=%d\n",
+                           i, h_C[i], h_C1[i]);
                     exit(1);
                 }
             }

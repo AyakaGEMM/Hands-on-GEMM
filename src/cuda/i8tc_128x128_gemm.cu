@@ -40,51 +40,58 @@ constexpr int shared_memory_size = shared_memory_element * sizeof(float); // sha
 //        : "l"(addr));
 //}
 
-__global__ void i8gemm64x64(const int8_t *A, const int8_t *B, int32_t *C,
-                            int M, int N, int K, int32_t alpha, int32_t beta)
+__global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
+                              int M, int N, int K, int32_t alpha, int32_t beta)
 {
     int lda = K;
     int ldb = N;
     int ldc = N;
 
-    const size_t baseIdx = threadIdx.x;
+    const size_t baseIdx = threadIdx.y * blockDim.y + threadIdx.x;
 
     const auto warpM = (baseIdx / 32) / 4;
     const auto warpN = (baseIdx / 32) % 4;
-    const auto rowA = blockIdx.x * 64 + warpM * WMMA_M;
-    const auto colB = blockIdx.y * 64 + warpN * WMMA_N;
+    const auto rowA = blockIdx.x * 128 + warpM * WMMA_M;
+    const auto colB = blockIdx.y * 128 + warpN * WMMA_N;
 
-    wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> a_frag;
-    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> b_frag;
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, int32_t> acc_frag;
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, int32_t> c_frag;
+    wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> a_frag[2];
+    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> b_frag[2];
+    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, int32_t> acc_frag[4];
+    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, int32_t> c_frag[4];
 
-    wmma::fill_fragment(acc_frag, 0);
+#pragma unroll
+    for (int i = 0; i < 4; i++)
+        wmma::fill_fragment(acc_frag[i], 0);
 
     for (int i = 0; i < K; i += WMMA_K)
     {
-        // Bounds checking
-        // Load the inputs
-        wmma::load_matrix_sync(a_frag, A + rowA * lda + i, lda);
-        wmma::load_matrix_sync(b_frag, B + colB + i * ldb, ldb);
+        wmma::load_matrix_sync(a_frag[0], A + rowA * lda + i, lda);
+        wmma::load_matrix_sync(a_frag[1], A + (rowA + 64) * lda + i, lda);
+        wmma::load_matrix_sync(b_frag[0], B + colB + i * ldb, ldb);
+        wmma::load_matrix_sync(b_frag[1], B + colB + 64 + i * ldb, ldb);
 
-        // Perform the matrix multiplication
-        wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
+        wmma::mma_sync(acc_frag[0], a_frag[0], b_frag[0], acc_frag[0]);
+        wmma::mma_sync(acc_frag[1], a_frag[0], b_frag[1], acc_frag[1]);
+        wmma::mma_sync(acc_frag[2], a_frag[1], b_frag[0], acc_frag[2]);
+        wmma::mma_sync(acc_frag[3], a_frag[1], b_frag[1], acc_frag[3]);
     }
 
-    // Load in current value of c, scale by beta, and add to result scaled by alpha
-    wmma::load_matrix_sync(c_frag, C + rowA * ldc + colB, ldc, wmma::mem_row_major);
-    for (int i = 0; i < c_frag.num_elements; i++)
+#pragma unroll
+    for (int ii = 0; ii < 4; ii++)
     {
-        c_frag.x[i] = alpha * acc_frag.x[i] + beta * c_frag.x[i];
+        wmma::load_matrix_sync(c_frag[ii], C + (rowA + 64 * (ii >> 1)) * ldc + colB + 64 * (ii & 1), ldc, wmma::mem_row_major);
+#pragma unroll
+        for (int i = 0; i < c_frag[ii].num_elements; i++)
+        {
+            c_frag[ii].x[i] = alpha * acc_frag[ii].x[i] + beta * c_frag[ii].x[i];
+        }
+        wmma::store_matrix_sync(C + (rowA + 64 * (ii >> 1)) * ldc + colB + 64 * (ii & 1), c_frag[ii], ldc, wmma::mem_row_major);
     }
-    // Store the output
-    wmma::store_matrix_sync(C + rowA * ldc + colB, c_frag, ldc, wmma::mem_row_major);
 }
 
 void i8gemm(int M, int N, int K, int8_t *a, int8_t *b, int32_t *c, int32_t alpha, int32_t beta)
 {
     dim3 threadsPerBlock(512);
-    dim3 numBlocks((M + 64 - 1) / 64, (N + 64 - 1) / 64);
-    i8gemm64x64<<<numBlocks, threadsPerBlock>>>(a, b, c, M, N, K, alpha, beta);
+    dim3 numBlocks((M + 128 - 1) / 128, (N + 128 - 1) / 128);
+    i8gemm128x128<<<numBlocks, threadsPerBlock>>>(a, b, c, M, N, K, alpha, beta);
 }
