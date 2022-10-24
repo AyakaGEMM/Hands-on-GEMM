@@ -90,14 +90,6 @@ int main(int argc, char **argv)
 
         checkCudaErrors(cudaMemcpy(d_C, h_C, CSIZE(int32_t), cudaMemcpyHostToDevice));
 
-        // dim3 dimBlock(BLOCK_SIZE_N / THREAD_SIZE_X, BLOCK_SIZE_M / THREAD_SIZE_Y);
-        // dim3 dimGrid(N / BLOCK_SIZE_N, M / BLOCK_SIZE_M);
-        // if (N % BLOCK_SIZE_N != 0)
-        //     dimGrid.x++;
-        // if (M % BLOCK_SIZE_M != 0)
-        //     dimGrid.y++;
-
-        // warm up here (not sure whether we need this or not)
         i8gemm(M, N, K, d_A, d_B, d_C, alpha, beta);
 
         checkCudaErrors(cudaEventRecord(start));

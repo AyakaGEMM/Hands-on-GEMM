@@ -71,7 +71,7 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
         {
             wmma::load_matrix_sync(a_frag[0], sharedA + warpM * WMMA_M * sharedLda + j * WMMA_K, sharedLda);
             wmma::load_matrix_sync(a_frag[1], sharedA + (64 + warpM * WMMA_M) * sharedLda + j * WMMA_K, sharedLda);
-            wmma::load_matrix_sync(b_frag[0], sharedB + warpN * WMMA_N + j * WMMA_K * ldb, ldb);
+            wmma::load_matrix_sync(b_frag[0], sharedB + warpN * WMMA_N + j * WMMA_K * sharedLdb, sharedLdb);
             wmma::load_matrix_sync(b_frag[1], sharedB + warpN * WMMA_N + 64 + j * WMMA_K * sharedLdb, sharedLdb);
 
             wmma::mma_sync(acc_frag[0], a_frag[0], b_frag[0], acc_frag[0]);
