@@ -114,9 +114,9 @@ int main(int argc, char **argv)
     showMatrix(h_C, M, N, "Matrix C1");
     showMatrix(h_C1, M, N, "Matrix C2");
 
-    i8gemm(M, N, K, d_A, d_B, d_C, alpha, beta);
-    checkCudaErrors(cudaMemcpy(h_C, d_C, CSIZE(int32_t), cudaMemcpyDeviceToHost));
-    showMatrix(h_C, M, N, "Matrix C1");
+    // i8gemm(M, N, K, d_A, d_B, d_C, alpha, beta);
+    // checkCudaErrors(cudaMemcpy(h_C, d_C, CSIZE(int32_t), cudaMemcpyDeviceToHost));
+    // showMatrix(h_C, M, N, "Matrix C1");
 
     refgemm(M, N, K, h_A, h_B, h_C, 1, -1);
     showMatrix(h_C, M, N, "Matrix C3");

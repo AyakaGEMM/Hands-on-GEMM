@@ -204,9 +204,11 @@ void copyMatrix(T *des, T *src, size_t M, size_t N)
 template <typename T>
 void showMatrix(T *A, int M, int N, const char *msg)
 {
+    T sum = 0;
     printf("===============%s===========\n", msg);
     for (int i = 0; i < M; i++)
     {
+        std::cout << i << ": ";
         for (int j = 0; j < N; j++)
         {
             if (std::is_same_v<T, int8_t>)
@@ -217,8 +219,13 @@ void showMatrix(T *A, int M, int N, const char *msg)
             {
                 std::cout << A[i * N + j] << " ";
             }
+            sum += A[i * N + j];
         }
         std::cout << std::endl;
     }
+    if (std::is_same_v<T, int8_t>)
+        std::cout << int(sum) << std::endl;
+    else
+        std::cout << sum / (M * N) << std::endl;
     printf("============================\n");
 }

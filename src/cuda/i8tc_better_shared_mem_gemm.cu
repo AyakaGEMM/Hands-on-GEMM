@@ -2,7 +2,6 @@
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <vector>
-//#define __CUDA_ARCH__ 750
 #include <mma.h>
 using namespace nvcuda;
 const int WMMA_M = 16;
@@ -43,15 +42,15 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
     const auto baseA = A + blockIdx.x * 128 * lda;
     const auto baseB = B + blockIdx.y * 128;
 
-    wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> a_frag[2];
-    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> b_frag[2];
+    wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> a_frag[2][2];
+    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, int8_t, wmma::row_major> b_frag[2][2];
     wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, int32_t> acc_frag[4];
     wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, int32_t> c_frag[4];
 
-    __shared__ int8_t shared_mem[128 * 32 * 2];
+    __shared__ int8_t shared_mem[128 * sharedLda * 2];
 
     auto sharedA = shared_mem;
-    auto sharedB = shared_mem + 128 * 32;
+    auto sharedB = shared_mem + 128 * sharedLda;
 
 #pragma unroll
     for (int i = 0; i < 4; i++)
@@ -59,28 +58,35 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
 
     for (int i = 0; i < K; i += WMMA_K * 2)
     {
-#pragma unroll
-        for (int count = 0; count < 8; count++)
-        {
-            sharedA[(warpId + count * 16) * sharedLda + laneId] = baseA[(warpId + count * 16) * lda + laneId + i];
-            sharedB[(baseIdx / 128 + count * 4) * sharedLdb + baseIdx % 128] = baseB[(baseIdx / 128 + i + count * 4) * ldb + baseIdx % 128];
-        }
+        *reinterpret_cast<int32_t *>(&sharedA[(baseIdx / 8) * sharedLda + ((baseIdx & 7) << 2)]) = *reinterpret_cast<const int32_t *>(&baseA[(baseIdx / 8) * lda + ((baseIdx & 7) << 2) + i]);
+        *reinterpret_cast<int32_t *>(&sharedA[(baseIdx / 8 + 64) * sharedLda + ((baseIdx & 7) << 2)]) = *reinterpret_cast<const int32_t *>(&baseA[(baseIdx / 8 + 64) * lda + ((baseIdx & 7) << 2) + i]);
+
+        *reinterpret_cast<int32_t *>(&sharedB[warpId * sharedLdb + (laneId << 2)]) = *reinterpret_cast<const int32_t *>(&baseB[(warpId + i) * ldb + (laneId << 2)]);
+        *reinterpret_cast<int32_t *>(&sharedB[(warpId + 16) * sharedLdb + (laneId << 2)]) = *reinterpret_cast<const int32_t *>(&baseB[(warpId + 16 + i) * ldb + (laneId << 2)]);
+
         __syncthreads();
-#pragma unroll
-        for (int j = 0; j < 2; j++)
-        {
-            wmma::load_matrix_sync(a_frag[0], sharedA + warpM * WMMA_M * sharedLda + j * WMMA_K, sharedLda);
-            wmma::load_matrix_sync(a_frag[1], sharedA + (64 + warpM * WMMA_M) * sharedLda + j * WMMA_K, sharedLda);
-            wmma::load_matrix_sync(b_frag[0], sharedB + warpN * WMMA_N + j * WMMA_K * sharedLdb, sharedLdb);
-            wmma::load_matrix_sync(b_frag[1], sharedB + warpN * WMMA_N + 64 + j * WMMA_K * sharedLdb, sharedLdb);
 
-            wmma::mma_sync(acc_frag[0], a_frag[0], b_frag[0], acc_frag[0]);
-            wmma::mma_sync(acc_frag[1], a_frag[0], b_frag[1], acc_frag[1]);
-            wmma::mma_sync(acc_frag[2], a_frag[1], b_frag[0], acc_frag[2]);
-            wmma::mma_sync(acc_frag[3], a_frag[1], b_frag[1], acc_frag[3]);
+        wmma::load_matrix_sync(a_frag[0][0], sharedA + warpM * WMMA_M * sharedLda, sharedLda);
+        wmma::load_matrix_sync(a_frag[1][0], sharedA + (64 + warpM * WMMA_M) * sharedLda, sharedLda);
+        wmma::load_matrix_sync(b_frag[0][0], sharedB + warpN * WMMA_N, sharedLdb);
+        wmma::load_matrix_sync(b_frag[1][0], sharedB + warpN * WMMA_N + 64, sharedLdb);
 
-            __syncthreads();
-        }
+        wmma::load_matrix_sync(a_frag[0][1], sharedA + warpM * WMMA_M * sharedLda + WMMA_K, sharedLda);
+        wmma::load_matrix_sync(a_frag[1][1], sharedA + (64 + warpM * WMMA_M) * sharedLda + WMMA_K, sharedLda);
+        wmma::load_matrix_sync(b_frag[0][1], sharedB + warpN * WMMA_N + WMMA_K * sharedLdb, sharedLdb);
+        wmma::load_matrix_sync(b_frag[1][1], sharedB + warpN * WMMA_N + 64 + WMMA_K * sharedLdb, sharedLdb);
+
+        wmma::mma_sync(acc_frag[0], a_frag[0][0], b_frag[0][0], acc_frag[0]);
+        wmma::mma_sync(acc_frag[1], a_frag[0][0], b_frag[1][0], acc_frag[1]);
+        wmma::mma_sync(acc_frag[2], a_frag[1][0], b_frag[0][0], acc_frag[2]);
+        wmma::mma_sync(acc_frag[3], a_frag[1][0], b_frag[1][0], acc_frag[3]);
+
+        wmma::mma_sync(acc_frag[0], a_frag[0][1], b_frag[0][1], acc_frag[0]);
+        wmma::mma_sync(acc_frag[1], a_frag[0][1], b_frag[1][1], acc_frag[1]);
+        wmma::mma_sync(acc_frag[2], a_frag[1][1], b_frag[0][1], acc_frag[2]);
+        wmma::mma_sync(acc_frag[3], a_frag[1][1], b_frag[1][1], acc_frag[3]);
+
+        __syncthreads();
     }
 
 #pragma unroll
