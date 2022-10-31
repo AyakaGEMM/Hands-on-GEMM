@@ -229,3 +229,15 @@ void showMatrix(T *A, int M, int N, const char *msg)
         std::cout << sum / (M * N) << std::endl;
     printf("============================\n");
 }
+
+template <typename T>
+void transposeMatrix(T *A, size_t M, size_t N)
+{
+    for (int i = 0; i < M; i++)
+    {
+        for (int j = i + 1; j < N; j++)
+        {
+            std::swap(A[i * M + j], A[j * N + i]);
+        }
+    }
+}

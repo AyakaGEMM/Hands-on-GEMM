@@ -27,7 +27,7 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
     const int ldb = N;
     const int ldc = N;
 
-    constexpr int sharedLda = 32;
+    constexpr int sharedLda = 48;
     constexpr int sharedLdb = 128;
 
     const size_t baseIdx = threadIdx.x;
@@ -64,7 +64,7 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
         *reinterpret_cast<int32_t *>(&sharedB[warpId * sharedLdb + (laneId << 2)]) = *reinterpret_cast<const int32_t *>(&baseB[(warpId + i) * ldb + (laneId << 2)]);
         *reinterpret_cast<int32_t *>(&sharedB[(warpId + 16) * sharedLdb + (laneId << 2)]) = *reinterpret_cast<const int32_t *>(&baseB[(warpId + 16 + i) * ldb + (laneId << 2)]);
 
-        __syncthreads();
+        __syncwarp();
 
         wmma::load_matrix_sync(a_frag[0][0], sharedA + warpM * WMMA_M * sharedLda, sharedLda);
         wmma::load_matrix_sync(a_frag[1][0], sharedA + (64 + warpM * WMMA_M) * sharedLda, sharedLda);

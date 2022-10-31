@@ -180,9 +180,6 @@ int main(int argc, char **argv)
 
         if (!ignore_error)
         {
-            checkCudaErrors(cudaMemcpy(d_C, h_C, CSIZE(int32_t), cudaMemcpyHostToDevice));
-            i8gemm(M, N, K, d_A, d_B, d_C, alpha, beta);
-            checkCudaErrors(cudaMemcpy(h_C, d_C, CSIZE(int32_t), cudaMemcpyDeviceToHost));
             checkCudaErrors(cudaMemcpy(d_C, h_C1, CSIZE(int32_t), cudaMemcpyHostToDevice));
             checkCuBlasErrors(
                 cublasGemmEx(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
@@ -194,6 +191,11 @@ int main(int argc, char **argv)
                              d_C, CUDA_R_32I, N,
                              CUBLAS_COMPUTE_32I, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
             checkCudaErrors(cudaMemcpy(h_C1, d_C, CSIZE(int32_t), cudaMemcpyDeviceToHost));
+            transposeMatrix(h_B, N, K);
+            checkCudaErrors(cudaMemcpy(d_B, h_B, BSIZE(int8_t), cudaMemcpyHostToDevice));
+            checkCudaErrors(cudaMemcpy(d_C, h_C, CSIZE(int32_t), cudaMemcpyHostToDevice));
+            i8gemm(M, N, K, d_A, d_B, d_C, alpha, beta);
+            checkCudaErrors(cudaMemcpy(h_C, d_C, CSIZE(int32_t), cudaMemcpyDeviceToHost));
 
             for (int i = 0; i < M * N; i++)
             {
@@ -212,7 +214,8 @@ int main(int argc, char **argv)
             printf("Ignore the error.\n");
         }
 
-        printf("ratio= %f\n", gigaFlops[0] / gigaFlops[1]);
+        printf("ratio (int8) = %f\n", gigaFlops[0] / gigaFlops[1]);
+        printf("ratio (fp16) = %f\n", gigaFlops[0] / gigaFlops[2]);
     }
     cublasDestroy(blas_handle);
 

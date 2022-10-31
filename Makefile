@@ -104,6 +104,9 @@ i8-test_%: $(BUILD)/i8-test.o $(BUILD)/i8%_gemm.o
 i8-test_%-d: $(BUILD)/i8-test-d.o $(BUILD)/i8%_gemm-d.o
 	$(CU) $^ -std=$(STD) $(DEBUG) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
 
+mma_ptx: $(MAIN_SOURCE)/mma_ptx.cu
+	$(CU) -std=$(STD) $(OPTI) $(INCLUDE_DIR) $^ -o $(BIN)/$@  $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
 .PHONY: clean
 clean:
 	rm $(BUILD)/*

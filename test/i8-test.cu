@@ -73,10 +73,6 @@ int main(int argc, char **argv)
     genRandomMatrix(h_C, M, N);
     copyMatrix(h_C1, h_C, M, N);
 
-    checkCudaErrors(cudaMemcpy(d_A, h_A, ASIZE(int8_t), cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(d_B, h_B, BSIZE(int8_t), cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(d_C, h_C, CSIZE(int32_t), cudaMemcpyHostToDevice)); // Free Memory
-
     for (int i = 0; i < M; i++)
         for (int j = 0; j < N; j++)
         {
@@ -86,16 +82,21 @@ int main(int argc, char **argv)
         }
     // showMatrix(h_C, M, N, "Matrix Ref");
     copyMatrix(h_C, h_C1, M, N);
+    transposeMatrix(h_B, M, N);
 
-    cudaEvent_t start, stop;
+    showMatrix(h_B, N, M, "transpose B");
+
+    checkCudaErrors(cudaMemcpy(d_A, h_A, ASIZE(int8_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_B, h_B, BSIZE(int8_t), cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_C, h_C, CSIZE(int32_t), cudaMemcpyHostToDevice));
+
     cublasHandle_t blas_handle;
     checkCuBlasErrors(cublasCreate(&blas_handle));
-    checkCudaErrors(cudaEventCreate(&start));
-    checkCudaErrors(cudaEventCreate(&stop));
-    float msecTotal = 0;
-    int nIter = 100;
 
     i8gemm(M, N, K, d_A, d_B, d_C, alpha, beta);
+    transposeMatrix(h_B, N, M);
+    showMatrix(h_B, N, M, "TT B");
+    checkCudaErrors(cudaMemcpy(d_B, h_B, BSIZE(int8_t), cudaMemcpyHostToDevice));
     checkCudaErrors(cudaMemcpy(h_C, d_C, CSIZE(int32_t), cudaMemcpyDeviceToHost));
     checkCuBlasErrors(
         cublasGemmEx(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
