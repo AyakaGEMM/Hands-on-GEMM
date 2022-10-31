@@ -2,9 +2,10 @@
 
 #pragma once
 
-#include <stdio.h>
+#include <iostream>
 #include "bcsr.hpp"
 #include "csr.hpp"
+#include <type_traits>
 
 void cal_block(bcsr *, float *);
 void generate_bcsr(bcsr *, float *);
@@ -115,6 +116,42 @@ void genRandomMatrix(float *A, int M, int N)
     }
 }
 
+void genRandomMatrix(int8_t *A, int M, int N)
+{
+    srand(time(NULL)); // Initialization, should only be called once.
+    for (int i = 0; i < M; i++)
+    {
+        for (int j = 0; j < N; j++)
+        {
+            A[i * N + j] = rand() % 127;
+        }
+    }
+}
+
+void genOneMatrix(int8_t *A, int M, int N)
+{
+    srand(time(NULL)); // Initialization, should only be called once.
+    for (int i = 0; i < M; i++)
+    {
+        for (int j = 0; j < N; j++)
+        {
+            A[i * N + j] = i > j ? 1 : 0;
+        }
+    }
+}
+
+void genRandomMatrix(int32_t *A, int M, int N)
+{
+    srand(time(NULL)); // Initialization, should only be called once.
+    for (int i = 0; i < M; i++)
+    {
+        for (int j = 0; j < N; j++)
+        {
+            A[i * N + j] = rand() % ((long long)(1 << 31) - 1);
+        }
+    }
+}
+
 void FillMatrix(float *A, float num, int M, int N)
 {
     for (int i = 0; i < M; i++)
@@ -155,7 +192,8 @@ void genSparseMatrix(float *A, int M, int N, int sparsity)
     }
 }
 
-void copyMatrix(float *des, float *src, int M, int N)
+template <class T>
+void copyMatrix(T *des, T *src, size_t M, size_t N)
 {
     for (int i = 0; i < M * N; i++)
     {
@@ -163,16 +201,43 @@ void copyMatrix(float *des, float *src, int M, int N)
     }
 }
 
-void showMatrix(float *A, int M, int N, const char *msg)
+template <typename T>
+void showMatrix(T *A, int M, int N, const char *msg)
 {
+    T sum = 0;
     printf("===============%s===========\n", msg);
     for (int i = 0; i < M; i++)
     {
+        std::cout << i << ": ";
         for (int j = 0; j < N; j++)
         {
-            printf("%f ", A[i * N + j]);
+            if (std::is_same_v<T, int8_t>)
+            {
+                std::cout << int(A[i * N + j]) << " ";
+            }
+            else
+            {
+                std::cout << A[i * N + j] << " ";
+            }
+            sum += A[i * N + j];
         }
-        printf("\n");
+        std::cout << std::endl;
     }
+    if (std::is_same_v<T, int8_t>)
+        std::cout << int(sum) << std::endl;
+    else
+        std::cout << sum / (M * N) << std::endl;
     printf("============================\n");
+}
+
+template <typename T>
+void transposeMatrix(T *A, size_t M, size_t N)
+{
+    for (int i = 0; i < M; i++)
+    {
+        for (int j = i + 1; j < N; j++)
+        {
+            std::swap(A[i * M + j], A[j * N + i]);
+        }
+    }
 }

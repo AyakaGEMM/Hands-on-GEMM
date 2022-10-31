@@ -11,9 +11,7 @@ BUILD=./build
 BIN=./bin
 MAIN_SOURCE=./benchmark
 STD=c++17
-FLAGS=-gencode=arch=compute_70,code=sm_70 \
-    -gencode=arch=compute_75,code=sm_75 \
-    -gencode=arch=compute_80,code=sm_80
+FLAGS=-gencode=arch=compute_75,code=sm_75
 OPTI=-O3  
 DEBUG=--debug -g -G -O0
 PTXAS_FLAGS=--ptxas-options=-v --expt-relaxed-constexpr -lineinfo
@@ -75,13 +73,39 @@ test_%: $(BUILD)/test.o $(BUILD)/%_gemm.o
 	$(CU) $^ -std=$(STD) -o $(BIN)/$@ -g $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
 
 test_%-d: $(BUILD)/test-d.o $(BUILD)/%_gemm-d.o
-	$(CU) $^ -std=$(STD) -o $(BIN)/$@ -g $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+	$(CU) $^ -std=$(STD) $(DEBUG) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
 
 i8gemm-test: $(BUILD)/i8gemm-test.o $(BUILD)/i8_gemm.o
-	$(CU) $^ -std=$(STD) -o $(BIN)/$@ -g $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+	$(CU) $^ -std=$(STD) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
 
 i8gemm-test-d: $(BUILD)/i8gemm-test-d.o $(BUILD)/i8_gemm-d.o
 	$(CU) $^ -std=$(STD) -o $(BIN)/$@ -g $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
+i8: $(BUILD)/i8.o $(BUILD)/i8gemm.o
+	$(CU) $^ -std=$(STD) $(OPTI) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
+i8-d: $(BUILD)/i8-d.o $(BUILD)/i8gemm-d.o
+	$(CU) $^ -std=$(STD) $(DEBUG) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
+i8_%: $(BUILD)/i8.o $(BUILD)/i8%_gemm.o
+	mkdir -p $(BIN)
+	$(CU) $^ -std=$(STD) $(OPTI) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+	# sh ${SCRIPT_SOURCE}/$@.sh
+
+i8-test: $(BUILD)/i8-test.o $(BUILD)/i8gemm.o
+	$(CU) $^ -std=$(STD) $(OPTI) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
+i8-test-d: $(BUILD)/i8-test-d.o $(BUILD)/i8gemm-d.o
+	$(CU) $^ -std=$(STD) $(DEBUG) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
+i8-test_%: $(BUILD)/i8-test.o $(BUILD)/i8%_gemm.o
+	$(CU) $^ -std=$(STD) $(OPTI) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
+i8-test_%-d: $(BUILD)/i8-test-d.o $(BUILD)/i8%_gemm-d.o
+	$(CU) $^ -std=$(STD) $(DEBUG) -o $(BIN)/$@ $(LIBS) $(FLAGS) $(Wno) $(PTXAS_FLAGS)
+
+mma_ptx: $(MAIN_SOURCE)/mma_ptx.cu
+	$(CU) -std=$(STD) $(OPTI) $(INCLUDE_DIR) $^ -o $(BIN)/$@  $(FLAGS) $(Wno) $(PTXAS_FLAGS)
 
 .PHONY: clean
 clean:

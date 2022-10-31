@@ -2,12 +2,6 @@
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <vector>
-#ifndef __CUDACC__
-#include "cuda_runtime.h"
-#include "device_launch_parameters.h"
-void __syncthreads(); // workaround __syncthreads warning
-void __syncwarp();
-#endif
 #include <iostream>
 constexpr size_t BLOCK_SIZE = 16; // we assume that every block has equal blockDim.x and blockDim.y
 constexpr size_t BLOCK_M = 128;   // These const values decide how many thing a thread compute and the amount of shared memory to allocate.
@@ -22,18 +16,6 @@ constexpr int shared_memory_element = shared_memory_A + shared_memory_B;
 constexpr int shared_memory_size = shared_memory_element * sizeof(float); // shared memory to use.
 #define colM(a, i, j, lda) a[((j) * (lda)) + (i)]
 #define rowM(a, i, j, lda) a[(j) + (i) * (lda)]
-
-constexpr __forceinline__ __device__ auto convertColIdx(int idx, const float *begin, int subM, int subN, int N)
-{
-    int m = idx / subM, n = idx % subM;
-    return begin + m + n * N;
-}
-
-constexpr __forceinline__ __device__ auto convertRowIdx(int idx, const float *begin, int subM, int subN, int N)
-{
-    int m = idx / subN, n = idx % subN;
-    return begin + m * N + n;
-}
 
 __global__ void matrixMul(const float *A, const float *B, float *C,
                           int M, int N, int K, float alpha, float beta)

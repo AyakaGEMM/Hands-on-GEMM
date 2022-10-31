@@ -89,9 +89,9 @@ int main(int argc, char **argv)
     //     printf("usage: ./main [M] [K] [N]\n");
     //     exit(0);
     // }
-    size_t M = 32;
-    size_t N = 32;
-    size_t K = 32;
+    size_t M = 7;
+    size_t N = 8;
+    size_t K = 8;
 
     std::cout << M << " " << N << " " << K << std::endl;
 
@@ -115,13 +115,6 @@ int main(int argc, char **argv)
     double msecPerMatrixMul[2] = {0, 0};
     double gigaFlops[2] = {0, 0};
     double flopsPerMatrixMul = 2.0 * M * N * K;
-
-    const int BLOCK_SIZE_M = 96;
-    const int BLOCK_SIZE_K = 32;
-    const int BLOCK_SIZE_N = 64;
-    const int THREAD_SIZE_Y = 6;
-    const int THREAD_SIZE_X = 4;
-    const bool ENABLE_DOUBLE_BUFFER = false;
 
     float alpha = 1;
     float beta = 0;

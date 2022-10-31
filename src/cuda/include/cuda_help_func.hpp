@@ -40,15 +40,17 @@ static const char *_cuBlasGetErrorEnum(cublasStatus_t error)
 
     case CUBLAS_STATUS_INTERNAL_ERROR:
         return "CUBLAS_STATUS_INTERNAL_ERROR";
+    case CUBLAS_STATUS_NOT_SUPPORTED:
+        return "CUBLAS_STATUS_NOT_SUPPORTED";
     }
     return "<unknown>";
 }
 
-#define checkCuBlasErrors(func)                                                     \
-    {                                                                               \
-        cublasStatus_t e = (func);                                                  \
-        if (e != CUBLAS_STATUS_SUCCESS)                                             \
-            printf("%s %d CuBlas: %s", __FILE__, __LINE__, _cuBlasGetErrorEnum(e)); \
+#define checkCuBlasErrors(func)                                                       \
+    {                                                                                 \
+        cublasStatus_t e = (func);                                                    \
+        if (e != CUBLAS_STATUS_SUCCESS)                                               \
+            printf("%s %d CuBlas: %s\n", __FILE__, __LINE__, _cuBlasGetErrorEnum(e)); \
     }
 
 #endif

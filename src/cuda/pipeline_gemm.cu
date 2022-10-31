@@ -2,17 +2,6 @@
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <vector>
-
-#ifndef __CUDACC__
-#define __CUDACC__
-#define __HAHA__
-#endif
-
-#include <cooperative_groups/memcpy_async.h>
-
-#ifdef __HAHA__
-#undef __CUDACC__
-#endif
 #include <cuda/pipeline>
 
 #ifndef __CUDACC__
@@ -37,18 +26,6 @@ constexpr int shared_memory_size = shared_memory_element * sizeof(float); // sha
 #define colM(a, i, j, lda) a[((j) * (lda)) + (i)]
 #define rowM(a, i, j, lda) a[(j) + (i) * (lda)]
 constexpr size_t stage_count = 2;
-
-__forceinline__ __device__ auto convertColIdx(int idx, const float *begin, int subM, int subN, int N)
-{
-    int m = idx / subM, n = idx % subM;
-    return begin + m + n * N;
-}
-
-__forceinline__ __device__ auto convertRowIdx(int idx, const float *begin, int subM, int subN, int N)
-{
-    int m = idx / subN, n = idx % subN;
-    return begin + m * N + n;
-}
 
 __global__ void matrixMul(const float *A, const float *B, float *C,
                           int M, int N, int K, float alpha, float beta)

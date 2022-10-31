@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
+#include <utility>
 
 // CUDA runtime
 #include <cuda_runtime.h>
@@ -20,29 +21,13 @@ extern void sgemm(int, int, int, float *, float *, float *, cublasHandle_t, floa
 
 int main(int argc, char **argv)
 {
-    if (argc < 2)
-    {
-        printf("usage: ./main [MAX_TEST_SIZE]\n");
-        exit(0);
-    }
-    std::vector<int> test_sizes;
-    size_t nmax = atoi(argv[1]);
-    bool miss_align = true, ignore_error = false;
-    if (argc > 2)
-        miss_align = atoi(argv[2]) == 1;
-    if (argc > 3)
-        ignore_error = atoi(argv[3]) == 1;
-    for (int i = 128; i <= nmax + 127; i += 128)
-    {
-        if (miss_align)
-        {
-            test_sizes.emplace_back(i - 1);
-            test_sizes.emplace_back(i + 1);
-        }
-        test_sizes.emplace_back(i);
-    }
+    std::vector<std::pair<int, int>> test_sizes = {{512, 2048}, {2048, 512}, {512, 1536}, {512, 1536}, {512 * 2, 2048 * 2}, {2048 * 2, 512 * 2}, {512 * 2, 1536 * 2}, {512 * 2, 1536 * 2}};
+    size_t nmax;
+    bool ignore_error = false;
+    if (argc > 1)
+        ignore_error = atoi(argv[1]) == 1;
 
-    nmax = test_sizes[test_sizes.size() - 1]; // we assume the last element is the largest one
+    nmax = 20000; // we assume the last element is the largest one
 
     float *h_A = new float[nmax * nmax];
     float *h_B = new float[nmax * nmax];
@@ -62,9 +47,9 @@ int main(int argc, char **argv)
 
     for (const auto &i : test_sizes)
     {
-        size_t M = i - 1;
-        size_t K = i;
-        size_t N = i;
+        size_t M = 100;
+        size_t K = i.first;
+        size_t N = i.second;
 
         printf("\nSize M: %u, N: %u, K: %u\n", M, N, K);
 
@@ -95,7 +80,7 @@ int main(int argc, char **argv)
         checkCudaErrors(cudaEventCreate(&start));
         checkCudaErrors(cudaEventCreate(&stop));
         float msecTotal = 0;
-        int nIter = 10;
+        int nIter = 100;
 
         checkCudaErrors(cudaMemcpy(d_C, h_C, CSIZE(float), cudaMemcpyHostToDevice));
 

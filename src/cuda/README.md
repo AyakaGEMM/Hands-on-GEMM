@@ -6,3 +6,7 @@
 4. float4 load 相比于传统的load会有broadcast limitation（不知道这个limitation在哪）。
 5. 使用double buffer来掩盖内存读取的延迟，但是我实际做出来感觉差不多，看到另一个开源实现感觉区别也不是很大。
 6. 高occupancy不一定代表高性能，但低occupancy往往意味着低性能。这是一个相对的概念，主要是因为有可能高occupancy但是每一个thread的运行效率不高从而导致高occupancy的性能不一定好。
+
+# Notes
+
+1. 第一版初始的i8 gemm不知道为何速度还比不上sgemm，理论上操作数一致，计算更快能带来更快的计算效率。
