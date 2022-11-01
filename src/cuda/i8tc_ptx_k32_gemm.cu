@@ -19,8 +19,8 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
     const int ldb = K;
     const int ldc = N;
 
-    constexpr int sharedLda = 16;
-    constexpr int sharedLdb = 16;
+    constexpr int sharedLda = 48;
+    constexpr int sharedLdb = 48;
 
     const size_t baseIdx = threadIdx.x;
 
@@ -38,24 +38,28 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
     auto sharedB = shared_mem + 128 * sharedLda;
 
     int32_t frag_c[16][2] = {}, frag_d[16][2] = {};
-    int32_t frag_a[4], frag_b[4];
+    int32_t frag_a[8], frag_b[8];
 
 #pragma unroll
-    for (int k = 0; k < K; k += WMMA_K)
+    for (int k = 0; k < K; k += WMMA_K * 2)
     {
-        // Do 32x32x16 (mnk) mma at a time.
-        *reinterpret_cast<int32_t *>(&sharedA[(baseIdx / 4) * sharedLda + ((baseIdx & 3) << 2)]) = *reinterpret_cast<const int32_t *>(&baseA[(baseIdx / 4) * lda + ((baseIdx & 3) << 2) + k]);
+        // Do 32x32x32 (mnk) mma at a time.
+        *reinterpret_cast<int32_t *>(&sharedA[(baseIdx / 8) * sharedLda + ((baseIdx & 7) << 2)]) = *reinterpret_cast<const int32_t *>(&baseA[(baseIdx / 8) * lda + ((baseIdx & 7) << 2) + k]);
+        *reinterpret_cast<int32_t *>(&sharedA[(baseIdx / 8 + 64) * sharedLda + ((baseIdx & 7) << 2)]) = *reinterpret_cast<const int32_t *>(&baseA[(baseIdx / 8 + 64) * lda + ((baseIdx & 7) << 2) + k]);
 
         // Need transpose here, I leave it here for now.
-        *reinterpret_cast<int32_t *>(&sharedB[(baseIdx / 4) * sharedLdb + ((baseIdx & 3) << 2)]) = *reinterpret_cast<const int32_t *>(&baseB[(baseIdx / 4) * ldb + ((baseIdx & 3) << 2) + k]);
+        *reinterpret_cast<int32_t *>(&sharedB[(baseIdx / 8) * sharedLdb + ((baseIdx & 7) << 2)]) = *reinterpret_cast<const int32_t *>(&baseB[(baseIdx / 8) * ldb + ((baseIdx & 7) << 2) + k]);
+        *reinterpret_cast<int32_t *>(&sharedB[(baseIdx / 8 + 64) * sharedLdb + ((baseIdx & 7) << 2)]) = *reinterpret_cast<const int32_t *>(&baseB[(baseIdx / 8 + 64) * ldb + ((baseIdx & 7) << 2) + k]);
 
         __syncthreads();
         // Load matrix in 4 stages, could try warp shuff and overlap in the future.
 #pragma unroll
         for (int i = 0; i < 4; i++) // 8 byte load.
         {
-            frag_a[i] = *reinterpret_cast<const int32_t *>(&sharedA[(laneId << 2) + i * 32 * 4 + (warpId / 4) * 32 * 16]);
-            frag_b[i] = *reinterpret_cast<const int32_t *>(&sharedB[(laneId << 2) + i * 32 * 4 + (warpId & 3) * 32 * 16]);
+            frag_a[i * 2] = *reinterpret_cast<const int32_t *>(&sharedA[(laneId % 4) * 4 + ((warpId / 4) * 32 + laneId / 4 + i * 8) * sharedLda]);
+            frag_a[i * 2 + 1] = *reinterpret_cast<const int32_t *>(&sharedA[(laneId % 4) * 4 + 16 + ((warpId / 4) * 32 + laneId / 4 + i * 8) * sharedLda]);
+            frag_b[i * 2] = *reinterpret_cast<const int32_t *>(&sharedB[(laneId % 4) * 4 + ((warpId & 3) * 32 + laneId / 4 + i * 8) * sharedLdb]);
+            frag_b[i * 2 + 1] = *reinterpret_cast<const int32_t *>(&sharedB[(laneId % 4) * 4 + 16 + ((warpId & 3) * 32 + laneId / 4 + i * 8) * sharedLdb]);
         }
 
         __syncwarp();
@@ -63,13 +67,17 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
 #pragma unroll
         for (int i = 0; i < 16; i++)
         {
-            asm volatile( // Do 8x8x16=1024 int8 fmma at a time.
+            asm( // Do 8x8x32=2048 int8 fmma at a time.
                 "mma.sync.aligned.m8n8k16.row.col.s32.s8.s8.s32 \
                 {%0, %1}, \
                 {%2}, {%3}, \
                 {%0, %1};"
+                "mma.sync.aligned.m8n8k16.row.col.s32.s8.s8.s32 \
+                {%0, %1}, \
+                {%4}, {%5}, \
+                {%0, %1};"
                 : "+r"(frag_c[i][0]), "+r"(frag_c[i][1])
-                : "r"(frag_a[i >> 2]), "r"(frag_b[i & 3])); // With an implicit __syncwarp() here.
+                : "r"(frag_a[(i >> 2) << 1]), "r"(frag_b[(i & 3) << 1]), "r"(frag_a[((i >> 2) << 1) + 1]), "r"(frag_b[((i & 3) << 1) + 1])); // With an implicit __syncwarp() here.
         }
 
         __syncthreads();

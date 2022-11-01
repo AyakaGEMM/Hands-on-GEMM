@@ -95,7 +95,7 @@ void test_gemm(cublasHandle_t handle, int m, int n, int k, T *A, T *B, S *C,
         cudaProfilerStart();
         gettimeofday(&start, NULL);
         int success = cublas_gemm_ex(handle,
-                                     CUBLAS_OP_N,
+                                     CUBLAS_OP_T,
                                      CUBLAS_OP_N,
                                      n,
                                      m,
@@ -121,7 +121,7 @@ void test_gemm(cublasHandle_t handle, int m, int n, int k, T *A, T *B, S *C,
 
 int main()
 {
-    int m = 4096, n = 8192, k = 1024;
+    int m = 4096, n = 4096, k = 4096;
     printf("shape: (%d, %d) x (%d, %d)\n", m, k, k, n);
     int start_algo = CUBLAS_GEMM_DEFAULT;
     int end_algo = CUBLAS_GEMM_ALGO23;
