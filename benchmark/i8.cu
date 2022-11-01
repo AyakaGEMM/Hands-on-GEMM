@@ -112,7 +112,7 @@ int main(int argc, char **argv)
         checkCudaErrors(cudaMemcpy(d_C, h_C1, CSIZE(int32_t), cudaMemcpyHostToDevice));
         // warmup here (not sure whether we need this or not)
         checkCuBlasErrors(
-            cublasGemmEx(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
+            cublasGemmEx(blas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
                          N, M, K,
                          &alpha,
                          d_B, CUDA_R_8I, N,
@@ -124,7 +124,7 @@ int main(int argc, char **argv)
         for (int run = 0; run < nIter; run++)
         {
             checkCuBlasErrors(
-                cublasGemmEx(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
+                cublasGemmEx(blas_handle, CUBLAS_OP_T, CUBLAS_OP_N,
                              N, M, K,
                              &alpha,
                              d_B, CUDA_R_8I, N,
