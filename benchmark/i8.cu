@@ -30,7 +30,7 @@ int main(int argc, char **argv)
         miss_align = atoi(argv[2]) == 1;
     if (argc > 3)
         ignore_error = atoi(argv[3]) == 1;
-    for (int i = 128; i <= nmax + 127; i += 128)
+    for (int i = 256; i <= nmax + 255; i += 256)
     {
         if (miss_align)
         {

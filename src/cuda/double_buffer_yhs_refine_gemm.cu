@@ -98,12 +98,6 @@ __global__ __launch_bounds__(256, 2) void matrixMul(const float *A, const float 
     preB.w = baseB[rowB * N + colB + 32 * 3];
     preA = *reinterpret_cast<const float4 *>(baseA + rowA * K + colA);
 
-    // #pragma unroll
-    //     for (int i = 0; i < 4; i++)
-    //     {
-    //         sts32(preB.x, addrB + ((baseIdx / 32) * BLOCK_N + (baseIdx & 31) * sizeof(float)));
-    //     }
-
     subB[(baseIdx / 32) * BLOCK_N + (baseIdx & 31)] = preB.x;
     subB[(baseIdx / 32) * BLOCK_N + (baseIdx & 31) + 32] = preB.y;
     subB[(baseIdx / 32) * BLOCK_N + (baseIdx & 31) + 32 * 2] = preB.z;

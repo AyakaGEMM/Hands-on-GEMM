@@ -58,8 +58,6 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaMalloc(&d_B, BSIZE(int8_t)));
     checkCudaErrors(cudaMalloc(&d_C, CSIZE(int32_t)));
 
-    std::cout << d_C << std::endl;
-
     double msecPerMatrixMul[2] = {0, 0};
     double gigaFlops[2] = {0, 0};
     double flopsPerMatrixMul = 2.0 * M * N * K;
@@ -71,17 +69,9 @@ int main(int argc, char **argv)
     genRandomMatrix(h_A, M, K);
     genRandomMatrix(h_B, K, N);
     genRandomMatrix(h_C, M, N);
+    memset(h_C, 0, CSIZE(int32_t));
     copyMatrix(h_C1, h_C, M, N);
 
-    for (int i = 0; i < M; i++)
-        for (int j = 0; j < N; j++)
-        {
-            h_C[i * N + j] = beta * h_C[i * N + j];
-            for (int k = 0; k < K; k++)
-                h_C[i * N + j] += alpha * h_A[i * K + k] * h_B[k * N + j];
-        }
-    // showMatrix(h_C, M, N, "Matrix Ref");
-    copyMatrix(h_C, h_C1, M, N);
     transposeMatrix(h_B, M, N);
 
     showMatrix(h_B, N, M, "transpose B");
