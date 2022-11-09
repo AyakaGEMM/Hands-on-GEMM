@@ -117,11 +117,7 @@ int main(int argc, char **argv)
     checkCudaErrors(cudaFree(d_C));
 
     delete[] h_A;
-    printf("Ok A\n");
     delete[] h_B;
-    printf("Ok B\n");
     delete[] h_C;
-    printf("Ok C\n");
     delete[] h_C1;
-    printf("Ok C1\n");
 }

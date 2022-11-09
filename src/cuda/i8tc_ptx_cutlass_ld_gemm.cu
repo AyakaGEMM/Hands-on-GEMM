@@ -37,8 +37,8 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
     auto sharedA = shared_mem;
     auto sharedB = shared_mem + BLOCK_M * sharedLda;
 
-    int32_t frag_c[64][2] = {};   // Initialize to 0.
-    int32_t frag_a[8], frag_b[8]; // Use streaming read to release the reg pressure.
+    int32_t frag_c[64][2] = {};         // Initialize to 0.
+    int32_t frag_a[8][4], frag_b[8][4]; // Use streaming read to release the reg pressure.
 
 #pragma unroll
     for (int k = 0; k < K; k += BLOCK_K)
@@ -59,30 +59,33 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
 
         __syncthreads();
         // Load matrix in 4 stages, could try warp shuff and overlap in the future.
+        for (int i = 0; i < 8; i++)
+        {
+            auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + i * 8 + laneId % 8) * sharedLda + (laneId / 8) * 16]);
+            auto ldB = __cvta_generic_to_shared(&sharedB[((warpId % 2) * 64 + i * 8 + laneId % 8) * sharedLdb + (laneId / 8) * 16]);
+            asm volatile(
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4, %5, %6, %7}, [%9];"
+                : "=r"(frag_a[i][0]), "=r"(frag_a[i][1]), "=r"(frag_a[i][2]), "=r"(frag_a[i][3]), "=r"(frag_b[i][0]), "=r"(frag_b[i][1]), "=r"(frag_b[i][2]), "=r"(frag_b[i][3])
+                : "l"(ldA), "l"(ldB));
+        }
 
 #pragma unroll
         for (int ik = 0; ik < 4; ik++)
         {
-#pragma unroll
-            for (int i = 0; i < 8; i++)
-            {
-                frag_b[i] = *reinterpret_cast<int32_t *>(&sharedB[((warpId & 1) * 64 + i * 8 + laneId / 4) * sharedLdb + (laneId % 4) * 4 + ik * 16]);
-                frag_a[i] = *reinterpret_cast<int32_t *>(&sharedA[((warpId / 2) * 64 + i * 8 + laneId / 4) * sharedLda + (laneId % 4) * 4 + ik * 16]);
-            }
-
 #pragma unroll
             for (int im = 0; im < 8; im++)
             {
 #pragma unroll
                 for (int in = 0; in < 8; in++)
                 {
-                    asm(
+                    asm volatile(
                         "mma.sync.aligned.m8n8k16.row.col.s32.s8.s8.s32 \
                         {%0, %1}, \
                         {%2}, {%3}, \
                         {%0, %1};"
                         : "+r"(frag_c[im * 8 + in][0]), "+r"(frag_c[im * 8 + in][1])
-                        : "r"(frag_a[im]), "r"(frag_b[in])); // With an implicit __syncwarp() here.
+                        : "r"(frag_a[im][ik]), "r"(frag_b[in][ik])); // With an implicit __syncwarp() here.
                 }
             }
         }

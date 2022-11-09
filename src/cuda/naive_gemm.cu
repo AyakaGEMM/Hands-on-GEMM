@@ -19,15 +19,17 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
     int baseY = blockIdx.y * blockDim.y;
 
     float c = 0;
+    float aa[64];
 
-    if (tx < M && ty < N)
-    {
-        for (int i = 0; i < K; i++)
-        {
-            c += A[tx * K + i] * B[i * N + ty];
-        }
-        C[tx * N + ty] = beta * C[tx * N + ty] + alpha * c; // we multiply alpha here to reduce the alpha cal num.
-    }
+    for (int i = 0; i < 8; i++)
+        for (int m = 0; m < 8; m++)
+            for (int n = 0; n < 8; n++)
+            {
+                aa[m * 8 + n] += A[(tx + m) * K + i] * B[i * N + ty + n];
+            }
+    for (int m = 0; m < 8; m++)
+        for (int n = 0; n < 8; n++)
+            C[(tx + m) * N + ty + n] = beta * C[(tx + m) * N + ty + n] + alpha * aa[m * 8 + n]; // we multiply alpha here to reduce the alpha cal num.
 }
 
 void sgemm(int M, int N, int K, float *a, float *b, float *c, float alpha = 1, float beta = 0)
