@@ -69,20 +69,22 @@ __global__ void i8gemm256x128x32(const int8_t *A, const int8_t *B, int32_t *C,
 
     __syncthreads();
 
-    auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + laneId) * sharedLda + stage * sharedASize]);
-    auto ldB = __cvta_generic_to_shared(&sharedB[((warpId & 1) * 64 + laneId) * sharedLdb + stage * sharedBSize]);
+    {
+        auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + laneId) * sharedLda + stage * sharedASize]);
+        auto ldB = __cvta_generic_to_shared(&sharedB[((warpId & 1) * 64 + laneId) * sharedLdb + stage * sharedBSize]);
 
-    asm volatile(
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
-        : "=r"(frag_a[0]), "=r"(frag_a[1]), "=r"(frag_a[2]), "=r"(frag_a[3]), "=r"(frag_b[0]), "=r"(frag_b[1]), "=r"(frag_b[2]), "=r"(frag_b[3])
-        : "l"(ldA), "l"(ldB));
+        asm volatile(
+            "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
+            "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
+            : "=r"(frag_a[0]), "=r"(frag_a[1]), "=r"(frag_a[2]), "=r"(frag_a[3]), "=r"(frag_b[0]), "=r"(frag_b[1]), "=r"(frag_b[2]), "=r"(frag_b[3])
+            : "l"(ldA), "l"(ldB));
 
-    asm volatile(
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
-        "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
-        : "=r"(frag_a[4]), "=r"(frag_a[5]), "=r"(frag_a[6]), "=r"(frag_a[7]), "=r"(frag_b[4]), "=r"(frag_b[5]), "=r"(frag_b[6]), "=r"(frag_b[7])
-        : "l"(ldA + 32 * sharedLda * sizeof(int8_t)), "l"(ldB + 32 * sharedLdb * sizeof(int8_t)));
+        asm volatile(
+            "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
+            "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
+            : "=r"(frag_a[4]), "=r"(frag_a[5]), "=r"(frag_a[6]), "=r"(frag_a[7]), "=r"(frag_b[4]), "=r"(frag_b[5]), "=r"(frag_b[6]), "=r"(frag_b[7])
+            : "l"(ldA + 32 * sharedLda * sizeof(int8_t)), "l"(ldB + 32 * sharedLdb * sizeof(int8_t)));
+    }
 
     for (int k = 0; k < K; k += BLOCK_K)
     {
@@ -98,6 +100,9 @@ __global__ void i8gemm256x128x32(const int8_t *A, const int8_t *B, int32_t *C,
 
             loadK += BLOCK_K;
         }
+
+        auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + laneId + BLOCK_M + offset) * sharedLda + stage * sharedASize]);
+        auto ldB = __cvta_generic_to_shared(&sharedB[((warpId & 1) * 64 + laneId + BLOCK_N + offset) * sharedLdb + stage * sharedBSize]);
 
         asm volatile(
             "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
@@ -141,17 +146,22 @@ __global__ void i8gemm256x128x32(const int8_t *A, const int8_t *B, int32_t *C,
 
         __syncthreads();
 
-        asm volatile(
-            "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
-            "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
-            : "=r"(frag_a[0]), "=r"(frag_a[1]), "=r"(frag_a[2]), "=r"(frag_a[3]), "=r"(frag_b[0]), "=r"(frag_b[1]), "=r"(frag_b[2]), "=r"(frag_b[3])
-            : "l"(ldA), "l"(ldB));
+        {
+            auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + laneId) * sharedLda + stage * sharedASize]);
+            auto ldB = __cvta_generic_to_shared(&sharedB[((warpId & 1) * 64 + laneId) * sharedLdb + stage * sharedBSize]);
 
-        asm volatile(
-            "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
-            "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
-            : "=r"(frag_a[4]), "=r"(frag_a[5]), "=r"(frag_a[6]), "=r"(frag_a[7]), "=r"(frag_b[4]), "=r"(frag_b[5]), "=r"(frag_b[6]), "=r"(frag_b[7])
-            : "l"(ldA + 32 * sharedLda * sizeof(int8_t)), "l"(ldB + 32 * sharedLdb * sizeof(int8_t)));
+            asm volatile(
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
+                : "=r"(frag_a[0]), "=r"(frag_a[1]), "=r"(frag_a[2]), "=r"(frag_a[3]), "=r"(frag_b[0]), "=r"(frag_b[1]), "=r"(frag_b[2]), "=r"(frag_b[3])
+                : "l"(ldA), "l"(ldB));
+
+            asm volatile(
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
+                : "=r"(frag_a[4]), "=r"(frag_a[5]), "=r"(frag_a[6]), "=r"(frag_a[7]), "=r"(frag_b[4]), "=r"(frag_b[5]), "=r"(frag_b[6]), "=r"(frag_b[7])
+                : "l"(ldA + 32 * sharedLda * sizeof(int8_t)), "l"(ldB + 32 * sharedLdb * sizeof(int8_t)));
+        }
     }
 
 #pragma unroll
@@ -162,10 +172,10 @@ __global__ void i8gemm256x128x32(const int8_t *A, const int8_t *B, int32_t *C,
         {
             auto idx = im * 8 + in;
             int32_t frag_d[2];
-            //*reinterpret_cast<int64_t *>(frag_d) = *reinterpret_cast<int64_t *>(&baseC[(im * 8 + laneId / 4) * ldc + in * 8 + (laneId & 3) * 2]); // I'm the reinterpret_cast master!
-            // frag_d[0] = frag_c[idx][0] * alpha + frag_d[0] * beta;
-            // frag_d[1] = frag_c[idx][1] * alpha + frag_d[1] * beta;
-            *reinterpret_cast<int64_t *>(&baseC[(im * 8 + laneId / 4) * ldc + in * 8 + (laneId & 3) * 2]) = *reinterpret_cast<int64_t *>(&frag_c[idx]);
+            *reinterpret_cast<int64_t *>(frag_d) = *reinterpret_cast<int64_t *>(&baseC[(im * 8 + laneId / 4) * ldc + in * 8 + (laneId & 3) * 2]); // I'm the reinterpret_cast master!
+            frag_d[0] = frag_c[idx][0] * alpha + frag_d[0] * beta;
+            frag_d[1] = frag_c[idx][1] * alpha + frag_d[1] * beta;
+            *reinterpret_cast<int64_t *>(&baseC[(im * 8 + laneId / 4) * ldc + in * 8 + (laneId & 3) * 2]) = *reinterpret_cast<int64_t *>(frag_d);
         }
     }
 }
