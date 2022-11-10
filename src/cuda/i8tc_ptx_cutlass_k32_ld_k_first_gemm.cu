@@ -66,15 +66,22 @@ __global__ void i8gemm256x128x32(const int8_t *A, const int8_t *B, int32_t *C,
         // Load matrix in 4 stages, could try warp shuff and overlap in the future.
 
 #pragma unroll
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < 2; i++)
         {
-            auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + i * 8 + laneId % 8 + (BLOCK_M + offset) * ((laneId / 8) & 1)) * sharedLda]);
-            auto ldB = __cvta_generic_to_shared(&sharedB[((warpId & 1) * 64 + i * 8 + laneId % 8 + (BLOCK_N + offset) * ((laneId / 8) & 1)) * sharedLdb]);
+            auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + laneId + (BLOCK_M + offset) * i) * sharedLda]);
+            auto ldB = __cvta_generic_to_shared(&sharedB[((warpId & 1) * 64 + laneId + (BLOCK_N + offset) * i) * sharedLdb]);
+
             asm volatile(
-                "ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [%4];"
-                "ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%2, %3}, [%5];"
-                : "=r"(frag_a[i]), "=r"(frag_a[i + 8]), "=r"(frag_b[i]), "=r"(frag_b[i + 8])
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
+                : "=r"(frag_a[0 + i * 8]), "=r"(frag_a[1 + i * 8]), "=r"(frag_a[2 + i * 8]), "=r"(frag_a[3 + i * 8]), "=r"(frag_b[0 + i * 8]), "=r"(frag_b[1 + i * 8]), "=r"(frag_b[2 + i * 8]), "=r"(frag_b[3 + i * 8])
                 : "l"(ldA), "l"(ldB));
+
+            asm volatile(
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4 ,%5, %6, %7}, [%9];"
+                : "=r"(frag_a[4 + i * 8]), "=r"(frag_a[5 + i * 8]), "=r"(frag_a[6 + i * 8]), "=r"(frag_a[7 + i * 8]), "=r"(frag_b[4 + i * 8]), "=r"(frag_b[5 + i * 8]), "=r"(frag_b[6 + i * 8]), "=r"(frag_b[7 + i * 8])
+                : "l"(ldA + 32 * sharedLda * sizeof(int8_t)), "l"(ldB + 32 * sharedLdb * sizeof(int8_t)));
         }
 
 #pragma unroll

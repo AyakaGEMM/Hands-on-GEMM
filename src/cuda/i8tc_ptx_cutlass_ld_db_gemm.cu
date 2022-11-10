@@ -36,9 +36,9 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
     constexpr auto sharedASize = BLOCK_M * BLOCK_K;
     constexpr auto sharedBSize = BLOCK_N * BLOCK_K;
 
-    __shared__ int8_t shared_mem[sharedASize + sharedBSize];
+    __shared__ int8_t shared_mem[(sharedASize + sharedBSize) * 2];
     auto sharedA = shared_mem;
-    auto sharedB = shared_mem + sharedASize;
+    auto sharedB = shared_mem + sharedASize * 2;
 
     int32_t frag_c[64][2] = {}; // Initialize to 0.
     int32_t frag_a[8][4], frag_b[8][4];
@@ -47,46 +47,77 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
 
     copy_t preA[4], preB[2];
 
+    int stage = 0;
+    int loadK = BLOCK_K;
+
 #pragma unroll
-    for (int k = 0; k < K; k += BLOCK_K)
+    for (int i = 0; i < 4; i++)
     {
-        // Do 64x64x64 (mnk) mma at a time according to cutlass.
-#pragma unroll
-        for (int i = 0; i < 4; i++)
-        {
-            preA[i] = *reinterpret_cast<const copy_t *>(&baseA[(baseIdx % 8 + warpId * 8 + i * 64) * lda + (laneId / 8) * 16 + k]);
-        }
+        preA[i] = *reinterpret_cast<const copy_t *>(&baseA[(baseIdx % 8 + warpId * 8 + i * 64) * lda + (laneId / 8) * 16]);
+    }
 
 #pragma unroll
-        for (int i = 0; i < 2; i++)
-        {
-            preB[i] = *reinterpret_cast<const copy_t *>(&baseB[(baseIdx % 8 + warpId * 8 + i * 64) * ldb + (laneId / 8) * 16 + k]);
-        }
+    for (int i = 0; i < 2; i++)
+    {
+        preB[i] = *reinterpret_cast<const copy_t *>(&baseB[(baseIdx % 8 + warpId * 8 + i * 64) * ldb + (laneId / 8) * 16]);
+    }
 
 #pragma unroll
-        for (int i = 0; i < 4; i++)
-        {
-            *reinterpret_cast<copy_t *>(&sharedA[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_M) * sharedLda]) = preA[i];
-        }
+    for (int i = 0; i < 4; i++)
+    {
+        *reinterpret_cast<copy_t *>(&sharedA[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_M) * sharedLda]) = preA[i];
+    }
 
 // Need transpose here, I leave it here for now.
 #pragma unroll
-        for (int i = 0; i < 2; i++)
-        {
-            *reinterpret_cast<copy_t *>(&sharedB[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_N) * sharedLdb]) = preB[i];
-        }
+    for (int i = 0; i < 2; i++)
+    {
+        *reinterpret_cast<copy_t *>(&sharedB[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_N) * sharedLdb]) = preB[i];
+    }
 
-        __syncthreads();
+    __syncthreads();
+
+#pragma unroll
+    for (int k = 0; k < K; k += BLOCK_K)
+    {
+
         // Load matrix in 4 stages, could try warp shuff and overlap in the future.
         for (int i = 0; i < 8; i++)
         {
-            auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + i * 8 + laneId % 8 + (laneId / 8) * BLOCK_M) * sharedLda]);
-            auto ldB = __cvta_generic_to_shared(&sharedB[((warpId % 2) * 64 + i * 8 + laneId % 8 + (laneId / 8) * BLOCK_N) * sharedLdb]);
+            auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + i * 8 + laneId % 8 + (laneId / 8) * BLOCK_M) * sharedLda + stage * sharedASize]);
+            auto ldB = __cvta_generic_to_shared(&sharedB[((warpId % 2) * 64 + i * 8 + laneId % 8 + (laneId / 8) * BLOCK_N) * sharedLdb + stage * sharedBSize]);
             asm volatile(
                 "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
                 "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4, %5, %6, %7}, [%9];"
                 : "=r"(frag_a[i][0]), "=r"(frag_a[i][1]), "=r"(frag_a[i][2]), "=r"(frag_a[i][3]), "=r"(frag_b[i][0]), "=r"(frag_b[i][1]), "=r"(frag_b[i][2]), "=r"(frag_b[i][3])
                 : "l"(ldA), "l"(ldB));
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            auto ldA = __cvta_generic_to_shared(&sharedA[((warpId / 2) * 64 + i * 8 + laneId % 8 + (laneId / 8) * BLOCK_M) * sharedLda + stage * sharedASize]);
+            auto ldB = __cvta_generic_to_shared(&sharedB[((warpId % 2) * 64 + i * 8 + laneId % 8 + (laneId / 8) * BLOCK_N) * sharedLdb + stage * sharedBSize]);
+            asm volatile(
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%8];"
+                "ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%4, %5, %6, %7}, [%9];"
+                : "=r"(frag_a[0][i]), "=r"(frag_a[1][i]), "=r"(frag_a[2][i]), "=r"(frag_a[3][i]), "=r"(frag_b[0][i]), "=r"(frag_b[1][i]), "=r"(frag_b[2][i]), "=r"(frag_b[3][i])
+                : "l"(ldA), "l"(ldB));
+        }
+
+        if (k + BLOCK_K < K)
+        {
+#pragma unroll
+            for (int i = 0; i < 4; i++)
+            {
+                preA[i] = *reinterpret_cast<const copy_t *>(&baseA[(baseIdx % 8 + warpId * 8 + i * 64) * lda + (laneId / 8) * 16 + loadK]);
+            }
+
+#pragma unroll
+            for (int i = 0; i < 2; i++)
+            {
+                preB[i] = *reinterpret_cast<const copy_t *>(&baseB[(baseIdx % 8 + warpId * 8 + i * 64) * ldb + (laneId / 8) * 16 + loadK]);
+            }
+            loadK += BLOCK_K;
         }
 
 #pragma unroll
@@ -107,6 +138,20 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
                         : "r"(frag_a[im][ik]), "r"(frag_b[in][ik])); // With an implicit __syncwarp() here.
                 }
             }
+        }
+
+        stage ^= 1;
+#pragma unroll
+        for (int i = 0; i < 4; i++)
+        {
+            *reinterpret_cast<copy_t *>(&sharedA[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_M) * sharedLda + stage * sharedASize]) = preA[i];
+        }
+
+// Need transpose here, I leave it here for now.
+#pragma unroll
+        for (int i = 0; i < 2; i++)
+        {
+            *reinterpret_cast<copy_t *>(&sharedB[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_N) * sharedLdb + stage * sharedBSize]) = preB[i];
         }
         __syncthreads();
     }
