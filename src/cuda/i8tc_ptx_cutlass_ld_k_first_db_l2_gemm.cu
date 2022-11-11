@@ -10,6 +10,7 @@ constexpr int WMMA_K = 16;
 constexpr int BLOCK_M = 256;
 constexpr int BLOCK_N = 128;
 constexpr int BLOCK_K = 64;
+constexpr int MAX_BLOCK_N = 8;
 #include <iostream>
 
 __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
@@ -23,15 +24,25 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
     constexpr int sharedLdb = 16;
 
     const size_t baseIdx = threadIdx.x;
+    const auto baseBlockIdx = blockIdx.x + gridDim.x * blockIdx.y;
 
     const auto warpM = (baseIdx / 32) / 4;
     const auto warpN = (baseIdx / 32) % 4;
     const auto laneId = baseIdx % 32;
     const auto warpId = baseIdx / 32;
 
-    const auto baseA = A + blockIdx.x * BLOCK_M * lda;
-    const auto baseB = B + blockIdx.y * BLOCK_N * ldb;
-    const auto baseC = C + blockIdx.x * BLOCK_M * ldc + blockIdx.y * BLOCK_N + (warpId / 2) * 64 * ldc + (warpId & 1) * 64;
+    const auto totalPanel = (gridDim.x * gridDim.y + MAX_BLOCK_N * gridDim.x - 1) / (MAX_BLOCK_N * gridDim.x);
+    const auto totalBlock = gridDim.x * gridDim.y;
+
+    const auto panelIdx = baseBlockIdx / (MAX_BLOCK_N * gridDim.x);
+    const auto strideLd = panelIdx + 1 < totalPanel ? MAX_BLOCK_N : (totalBlock - panelIdx * (MAX_BLOCK_N * gridDim.x)) / gridDim.x;
+
+    const auto blockM = (panelIdx & 1) ? gridDim.x - (baseBlockIdx - panelIdx * MAX_BLOCK_N * gridDim.x) / strideLd - 1 : (baseBlockIdx - panelIdx * MAX_BLOCK_N * gridDim.x) / strideLd;
+    const auto blockN = (baseBlockIdx - panelIdx * MAX_BLOCK_N * gridDim.x) % strideLd + panelIdx * MAX_BLOCK_N;
+
+    const auto baseA = A + blockM * BLOCK_M * lda;
+    const auto baseB = B + blockN * BLOCK_N * ldb;
+    const auto baseC = C + blockM * BLOCK_M * ldc + blockN * BLOCK_N + (warpId / 2) * 64 * ldc + (warpId & 1) * 64;
 
     constexpr auto sharedASize = BLOCK_M * BLOCK_K;
     constexpr auto sharedBSize = BLOCK_N * BLOCK_K;
@@ -96,7 +107,6 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
     for (int k = 0; k + BLOCK_K < K; k += BLOCK_K)
     {
         // Do 64x64x64 (mnk) mma at a time according to cutlass.
-
 #pragma unroll
         for (int i = 0; i < 4; i++)
         {

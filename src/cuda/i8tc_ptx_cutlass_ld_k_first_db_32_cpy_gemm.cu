@@ -43,34 +43,42 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
     int32_t frag_c[64][2] = {}; // Initialize to 0.
     int32_t frag_a[8][2], frag_b[8][2];
 
-    using copy_t = __int128_t; // I use float to store int, haha.
+    using copy_t = int32_t; // Back to int32_t
     int stage = 0;
     int loadK = BLOCK_K;
 
-    copy_t preA[4], preB[2];
+    copy_t preA[4][4], preB[2][4];
 
 #pragma unroll
     for (int i = 0; i < 4; i++)
     {
-        preA[i] = *reinterpret_cast<const copy_t *>(&baseA[(baseIdx % 8 + warpId * 8 + i * 64) * lda + (laneId / 8) * 16]);
+        for (int j = 0; j < 4; j++)
+            preA[i][j] = *reinterpret_cast<const copy_t *>(&baseA[(baseIdx % 8 + warpId * 8 + i * 64) * lda + (laneId / 8) * 4 + j * 16]);
     }
 
 #pragma unroll
     for (int i = 0; i < 2; i++)
     {
-        preB[i] = *reinterpret_cast<const copy_t *>(&baseB[(baseIdx % 8 + warpId * 8 + i * 64) * ldb + (laneId / 8) * 16]);
+        for (int j = 0; j < 4; j++)
+            preB[i][j] = *reinterpret_cast<const copy_t *>(&baseB[(baseIdx % 8 + warpId * 8 + i * 64) * ldb + (laneId / 8) * 4 + j * 16]);
     }
 
 #pragma unroll
     for (int i = 0; i < 4; i++)
     {
-        *reinterpret_cast<copy_t *>(&sharedA[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_M) * sharedLda]) = preA[i];
+        for (int j = 0; j < 4; j++)
+        {
+            *reinterpret_cast<copy_t *>(&sharedA[(baseIdx % 8 + warpId * 8 + i * 64 + j * BLOCK_M) * sharedLda + (laneId / 8) * 4]) = preA[i][j];
+        }
     }
 
 #pragma unroll
     for (int i = 0; i < 2; i++)
     {
-        *reinterpret_cast<copy_t *>(&sharedB[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_N) * sharedLdb]) = preB[i];
+        for (int j = 0; j < 4; j++)
+        {
+            *reinterpret_cast<copy_t *>(&sharedB[(baseIdx % 8 + warpId * 8 + i * 64 + j * BLOCK_N) * sharedLdb + (laneId / 8) * 4]) = preB[i][j];
+        }
     }
 
     __syncthreads();
@@ -100,13 +108,15 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
 #pragma unroll
         for (int i = 0; i < 4; i++)
         {
-            preA[i] = *reinterpret_cast<const copy_t *>(&baseA[(baseIdx % 8 + warpId * 8 + i * 64) * lda + (laneId / 8) * 16 + k + BLOCK_K]);
+            for (int j = 0; j < 4; j++)
+                preA[i][j] = *reinterpret_cast<const copy_t *>(&baseA[(baseIdx % 8 + warpId * 8 + i * 64) * lda + (laneId / 8) * 4 + j * 16 + k]);
         }
 
 #pragma unroll
         for (int i = 0; i < 2; i++)
         {
-            preB[i] = *reinterpret_cast<const copy_t *>(&baseB[(baseIdx % 8 + warpId * 8 + i * 64) * ldb + (laneId / 8) * 16 + k + BLOCK_K]);
+            for (int j = 0; j < 4; j++)
+                preB[i][j] = *reinterpret_cast<const copy_t *>(&baseB[(baseIdx % 8 + warpId * 8 + i * 64) * ldb + (laneId / 8) * 4 + j * 16 + k]);
         }
 
 #pragma unroll
@@ -152,13 +162,19 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
 #pragma unroll
         for (int i = 0; i < 4; i++)
         {
-            *reinterpret_cast<copy_t *>(&sharedA[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_M) * sharedLda + stage * sharedASize]) = preA[i];
+            for (int j = 0; j < 4; j++)
+            {
+                *reinterpret_cast<copy_t *>(&sharedA[(baseIdx % 8 + warpId * 8 + i * 64 + j * BLOCK_M) * sharedLda + (laneId / 8) * 4]) = preA[i][j];
+            }
         }
 
 #pragma unroll
         for (int i = 0; i < 2; i++)
         {
-            *reinterpret_cast<copy_t *>(&sharedB[(baseIdx % 8 + warpId * 8 + i * 64 + (laneId / 8) * BLOCK_N) * sharedLdb + stage * sharedBSize]) = preB[i];
+            for (int j = 0; j < 4; j++)
+            {
+                *reinterpret_cast<copy_t *>(&sharedB[(baseIdx % 8 + warpId * 8 + i * 64 + j * BLOCK_N) * sharedLdb + (laneId / 8) * 4]) = preB[i][j];
+            }
         }
 
         __syncthreads();
@@ -230,7 +246,7 @@ __global__ void i8gemm256x128x64(const int8_t *A, const int8_t *B, int32_t *C,
             *reinterpret_cast<int64_t *>(frag_d) = *reinterpret_cast<int64_t *>(&baseC[(im * 8 + laneId / 4) * ldc + in * 8 + (laneId & 3) * 2]); // I'm the reinterpret_cast master!
             frag_d[0] = frag_c[idx][0] * alpha + frag_d[0] * beta;
             frag_d[1] = frag_c[idx][1] * alpha + frag_d[1] * beta;
-            *reinterpret_cast<int64_t *>(&baseC[(im * 8 + laneId / 4) * ldc + in * 8 + (laneId & 3) * 2]) = *reinterpret_cast<int64_t *>(&frag_c[idx]);
+            *reinterpret_cast<int64_t *>(&baseC[(im * 8 + laneId / 4) * ldc + in * 8 + (laneId & 3) * 2]) = *reinterpret_cast<int64_t *>(frag_d);
         }
     }
 }
