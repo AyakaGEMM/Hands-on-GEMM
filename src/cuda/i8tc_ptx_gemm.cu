@@ -7,9 +7,9 @@ using namespace nvcuda;
 constexpr int WMMA_M = 16;
 constexpr int WMMA_N = 16;
 constexpr int WMMA_K = 16;
-constexpr int WARP_M = 128;
-constexpr int WARP_N = 128;
-constexpr int WARP_K = 128;
+constexpr int BLOCK_M = 128;
+constexpr int BLOCK_N = 128;
+constexpr int BLOCK_K = 128;
 #include <iostream>
 
 __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
@@ -88,6 +88,6 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
 void i8gemm(int M, int N, int K, int8_t *a, int8_t *b, int32_t *c, int32_t alpha, int32_t beta)
 {
     dim3 threadsPerBlock(512);
-    dim3 numBlocks((M + WARP_M - 1) / WARP_M, (N + WARP_N - 1) / WARP_N);
+    dim3 numBlocks((M + BLOCK_M - 1) / BLOCK_M, (N + BLOCK_N - 1) / BLOCK_N);
     i8gemm128x128<<<numBlocks, threadsPerBlock>>>(a, b, c, M, N, K, alpha, beta);
 }

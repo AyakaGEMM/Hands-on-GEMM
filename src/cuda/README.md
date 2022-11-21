@@ -10,3 +10,7 @@
 # Notes
 
 1. 第一版初始的i8 gemm不知道为何速度还比不上sgemm，理论上操作数一致，计算更快能带来更快的计算效率。
+
+# Problems
+
+1. If I use $K_{tile} = 64$, then the l2 cache hit rate will be quite low (at about ~81% compared to ~91% when using $K_{ile}=32$). This may be caused by the HW l2 data exchange strategy. Could try [3.2.3. Device Memory L2 Access Management](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#L2_access_intro) or ptx ld instruction with cache hint in the future.
