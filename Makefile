@@ -11,7 +11,7 @@ BUILD=./build
 BIN=./bin
 MAIN_SOURCE=./benchmark
 STD=c++17
-FLAGS=-gencode=arch=compute_75,code=sm_75
+FLAGS=-gencode=arch=compute_89,code=sm_89
 OPTI=-O3  
 DEBUG=--debug -g -G -O0
 PTXAS_FLAGS=--ptxas-options=-v --expt-relaxed-constexpr -lineinfo
