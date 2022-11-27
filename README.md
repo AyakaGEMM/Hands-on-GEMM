@@ -8,7 +8,7 @@ A GEMM tutorial.
 
 # Usage
 
-去 `src/cuda` 文件夹下面，找到你想看性能的 gemm，首先`mkdir build`，然后输入 `make benchmark_xxx`。
+去 `src/cuda` 文件夹下面，找到你想看性能的 gemm，记住那个名字，然后回到主项目文件夹下，首先`mkdir build`，然后输入 `make benchmark_xxx`。
 
 如你想看 `double_buffer_yhs_refine_gemm.cu` 这个矩阵乘的性能，就输入：
 
