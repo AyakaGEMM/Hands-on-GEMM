@@ -20,4 +20,4 @@ make benchmark_double_buffer_yhs_refine
 
 # Tutorial
 
-投到机器之心上面去了，所以得等他们先发我才能放出来。（大概快了）
+知乎链接：[这里](https://zhuanlan.zhihu.com/p/584236348)
