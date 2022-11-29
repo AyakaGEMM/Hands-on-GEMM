@@ -1,6 +1,6 @@
 # Hands-on-GEMM
 
-A GEMM tutorial.
+A GEMM tutorial by Yi Zhang/张译 at NLP Lab., Northeastern University.
 
 # Performance
 
