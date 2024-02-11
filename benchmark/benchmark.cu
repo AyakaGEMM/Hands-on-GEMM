@@ -27,7 +27,7 @@ int main(int argc, char **argv)
     }
     std::vector<int> test_sizes;
     size_t nmax = atoi(argv[1]);
-    bool miss_align = true, ignore_error = false;
+    bool miss_align = false, ignore_error = false;
     if (argc > 2)
         miss_align = atoi(argv[2]) == 1;
     if (argc > 3)
