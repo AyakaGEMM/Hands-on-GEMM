@@ -50,7 +50,7 @@ __global__ void i8gemm8x8x128(const int8_t *A, const int8_t *B, int32_t *C,
     const size_t baseY = blockIdx.y * blockDim.y * BLOCK_N_COMPUTE;
 
     const int moveNum = shared_memory_element / (BLOCK_SIZE * BLOCK_SIZE) / 2;
-    const size_t baseIdx = threadIdx.y * blockDim.y + threadIdx.x;
+    const size_t baseIdx = threadIdx.y * blockDim.x + threadIdx.x;
 
     constexpr size_t threadsNum = BLOCK_SIZE * BLOCK_SIZE;
 

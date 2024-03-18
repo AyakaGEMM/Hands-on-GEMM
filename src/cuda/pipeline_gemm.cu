@@ -32,7 +32,7 @@ __global__ void matrixMul(const float *A, const float *B, float *C,
 {
     const size_t baseX = blockIdx.x * blockDim.x * BLOCK_M_COMPUTE;
     const size_t baseY = blockIdx.y * blockDim.y * BLOCK_N_COMPUTE;
-    const size_t baseIdx = threadIdx.y * blockDim.y + threadIdx.x;
+    const size_t baseIdx = threadIdx.y * blockDim.x + threadIdx.x;
 
     constexpr size_t threadsNum = BLOCK_SIZE * BLOCK_SIZE;
 

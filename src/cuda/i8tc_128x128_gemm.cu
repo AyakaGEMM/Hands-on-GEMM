@@ -47,7 +47,7 @@ __global__ void i8gemm128x128(const int8_t *A, const int8_t *B, int32_t *C,
     int ldb = N;
     int ldc = N;
 
-    const size_t baseIdx = threadIdx.y * blockDim.y + threadIdx.x;
+    const size_t baseIdx = threadIdx.y * blockDim.x + threadIdx.x;
 
     const auto warpM = (baseIdx / 32) / 4;
     const auto warpN = (baseIdx / 32) % 4;
